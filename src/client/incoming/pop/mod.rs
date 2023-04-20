@@ -3,7 +3,7 @@ mod parse;
 use std::collections::HashMap;
 
 use async_native_tls::{TlsConnector, TlsStream};
-use async_pop3::types::UniqueIDResponse;
+use async_pop::types::UniqueIDResponse;
 use async_trait::async_trait;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -13,7 +13,7 @@ use tokio::{
 use crate::{
     client::incoming::IncomingSession,
     parse::{parse_headers, parse_rfc822},
-    types::{Counts, Error, ErrorKind, Flag, MailBox, Message, Preview, Result},
+    types::{Error, ErrorKind, Flag, MailBox, Message, MessageCounts, Preview, Result},
 };
 
 use parse::parse_address;
@@ -23,11 +23,11 @@ use self::parse::parse_preview_from_headers;
 const MAILBOX_DEFAULT_NAME: &str = "Inbox";
 
 pub struct PopClient<S: AsyncRead + AsyncWrite + Unpin> {
-    session: async_pop3::Client<S>,
+    session: async_pop::Client<S>,
 }
 
 pub struct PopSession<S: AsyncRead + AsyncWrite + Unpin> {
-    session: async_pop3::Client<S>,
+    session: async_pop::Client<S>,
     current_mailbox: Vec<MailBox>,
     unique_id_map: HashMap<String, u32>,
 }
@@ -39,7 +39,7 @@ pub async fn connect<S: AsRef<str>, P: Into<u16>>(
     let tls = TlsConnector::new();
 
     let session =
-        async_pop3::connect((server.as_ref(), port.into()), server.as_ref(), &tls, None).await?;
+        async_pop::connect((server.as_ref(), port.into()), server.as_ref(), &tls, None).await?;
 
     Ok(PopClient { session })
 }
@@ -48,7 +48,7 @@ pub async fn connect_plain<S: AsRef<str>, P: Into<u16>>(
     server: S,
     port: P,
 ) -> Result<PopClient<TcpStream>> {
-    let session = async_pop3::connect_plain((server.as_ref(), port.into()), None).await?;
+    let session = async_pop::connect_plain((server.as_ref(), port.into()), None).await?;
 
     Ok(PopClient { session })
 }
@@ -70,7 +70,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PopClient<S> {
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> PopSession<S> {
-    fn get_session_mut(&mut self) -> &mut async_pop3::Client<S> {
+    fn get_session_mut(&mut self) -> &mut async_pop::Client<S> {
         &mut self.session
     }
 
@@ -80,19 +80,21 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PopSession<S> {
     async fn get_default_box(&mut self) -> Result<MailBox> {
         let session = self.get_session_mut();
 
-        let message_count = session.stat().await?.0;
+        let stats = session.stat().await?;
+
+        let message_count = stats.messsage_count();
 
         let box_name = MAILBOX_DEFAULT_NAME;
 
-        let counts = Counts::new(0, message_count);
+        let counts = MessageCounts::new(0, *message_count);
 
         let mailbox = MailBox::new(Some(counts), None, Vec::new(), true, box_name, box_name);
 
         Ok(mailbox)
     }
 
-    async fn get_msg_number_from_msg_id(&mut self, msg_id: &str) -> Result<u32> {
-        match self.unique_id_map.get(msg_id) {
+    async fn get_msg_number_from_msg_id<T: AsRef<str>>(&mut self, msg_id: T) -> Result<u32> {
+        match self.unique_id_map.get(msg_id.as_ref()) {
             Some(msg_number) => return Ok(msg_number.clone()),
             None => {}
         };
@@ -104,19 +106,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PopSession<S> {
                 // We gave the function a 'None' so it should never return this
                 unreachable!()
             }
-            UniqueIDResponse::UniqueIDList(unique_ids) => unique_ids,
+            UniqueIDResponse::UniqueIDList(list) => list,
         };
 
         self.unique_id_map = unique_id_vec
             .into_iter()
-            .map(|(msg_number, msg_id)| (msg_id, msg_number))
+            .map(|list| (list.unique_id().to_string(), list.count().to_owned()))
             .collect();
 
-        match self.unique_id_map.get(msg_id) {
+        match self.unique_id_map.get(msg_id.as_ref()) {
             Some(msg_number) => Ok(msg_number.clone()),
             None => Err(Error::new(
                 ErrorKind::UnexpectedBehavior,
-                format!("Could not find a message with id {}", msg_id),
+                format!("Could not find a message with id {}", msg_id.as_ref()),
             )),
         }
     }
@@ -199,15 +201,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingSession for PopSession<S>
             let uidl_response = session.uidl(Some(msg_number)).await?;
 
             let unique_id = match uidl_response {
-                UniqueIDResponse::UniqueIDList(all_messages) => {
-                    all_messages.into_iter().next().unwrap().1
-                }
-                UniqueIDResponse::UniqueID(item) => item.1,
-            };
+                UniqueIDResponse::UniqueIDList(list) => {
+                    let first = list.first().ok_or(Error::new(
+                        ErrorKind::UnexpectedBehavior,
+                        "Missing unique id for message",
+                    ))?;
 
-            // Add the unique id to the local map so we don't have to retrieve the entire list of unique id's later
-            // just to get this message's msg_number.
-            unique_id_map.insert(unique_id.clone(), msg_number);
+                    first.unique_id().to_string()
+                }
+                UniqueIDResponse::UniqueID(item) => item.unique_id().to_string(),
+            };
 
             let header_bytes = session.top(msg_number, 0).await?;
 
@@ -220,7 +223,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingSession for PopSession<S>
                 flags.push(Flag::Deleted)
             }
 
-            let preview = Preview::new(from, flags, unique_id, sent, subject);
+            let preview = Preview::new(from, flags, &unique_id, sent, subject);
+
+            // Add the unique id to the local map so we don't have to retrieve the entire list of unique id's later
+            // just to get this message's msg_number.
+            unique_id_map.insert(unique_id, msg_number);
 
             previews.push(preview)
         }
@@ -230,7 +237,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingSession for PopSession<S>
         Ok(previews)
     }
 
-    async fn get_message(&mut self, _: &str, msg_id: &str) -> Result<Message> {
+    async fn get_message(&mut self, _box_id: &str, msg_id: &str) -> Result<Message> {
         let msg_number = self.get_msg_number_from_msg_id(msg_id).await?;
 
         let session = self.get_session_mut();

@@ -1,5 +1,5 @@
 [package]
-name = "core"
+name = "dust-mail"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,13 +10,13 @@ edition = "2021"
 async-imap = {version = "0.6.0", default-features = false, features = ["runtime-tokio"], optional = true }
 
 # Pop
-async-pop3 = { git = "https://github.com/Dust-Mail/async-pop", version = "0.1.0", optional = true }
+async-pop = {version = "0.1", optional = true }
 
 # Smtp
 lettre = { version = "0.10", optional = true }
 
 # Autodetect service
-autoconfig = { git = "https://github.com/Dust-Mail/autoconfig", version = "0.1.0", optional = true }
+autoconfig = { version = "0.2", optional = true }
 
 # Generic mail utilities
 mailparse = "0.14"
@@ -51,5 +51,5 @@ autoconfig = ["dep:autoconfig"]
 
 smtp = ["dep:lettre"]
 
-pop = ["dep:async-pop3"]
+pop = ["dep:async-pop"]
 imap = ["dep:async-imap"] 

@@ -11,7 +11,7 @@ const DEFAULT_DELIMITER: &str = ".";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct MailBox {
-    counts: Option<Counts>,
+    counts: Option<MessageCounts>,
     delimiter: Option<String>,
     children: Vec<MailBox>,
     selectable: bool,
@@ -20,14 +20,15 @@ pub struct MailBox {
 }
 
 #[derive(Debug, Default, Clone, Serialize, PartialEq, Eq)]
-pub struct Counts {
+/// A struct that holds the count for the total amount messages and the total amount of unseen messages in a mailbox
+pub struct MessageCounts {
     unseen: u32,
     total: u32,
 }
 
-impl Counts {
+impl MessageCounts {
     pub fn new(unseen: u32, total: u32) -> Self {
-        Counts { unseen, total }
+        MessageCounts { unseen, total }
     }
 
     /// The total amount of message that have not been read in this mailbox
@@ -41,9 +42,15 @@ impl Counts {
     }
 }
 
+impl From<ImapCounts> for MessageCounts {
+    fn from(imap_counts: ImapCounts) -> Self {
+        Self::new(imap_counts.unseen.unwrap_or(0), imap_counts.exists)
+    }
+}
+
 impl MailBox {
     pub fn new<S: Into<String>>(
-        counts: Option<Counts>,
+        counts: Option<MessageCounts>,
         delimiter: Option<String>,
         children: Vec<MailBox>,
         selectable: bool,
@@ -61,14 +68,14 @@ impl MailBox {
     }
 
     /// A struct containing some info about the message counts in this mailbox.
-    pub fn counts(&self) -> Option<&Counts> {
+    pub fn counts(&self) -> Option<&MessageCounts> {
         self.counts.as_ref()
     }
 
     #[cfg(feature = "imap")]
     /// Create a counts struct from a given imap mailbox struct and update the local attribute.
     pub fn create_counts(&mut self, imap_counts: ImapCounts) {
-        let counts = Counts::new(imap_counts.unseen.unwrap_or(0), imap_counts.exists);
+        let counts = MessageCounts::from(imap_counts);
 
         self.counts = Some(counts);
     }
@@ -147,7 +154,7 @@ impl Default for MailBox {
     fn default() -> Self {
         Self {
             children: Vec::new(),
-            counts: Some(Counts::default()),
+            counts: Some(MessageCounts::default()),
             delimiter: None,
             id: String::new(),
             name: String::new(),
@@ -224,6 +231,34 @@ impl MailBoxList {
         Self::find_box_in_list(&self.list, box_id)
     }
 
+    pub fn get_box_mut<S: AsRef<str>>(&mut self, box_id: S) -> Option<&mut MailBox> {
+        Self::find_box_in_list_mut(&mut self.list, box_id)
+    }
+
+    /// Finds a mailbox with a given id in a tree-like array list using breadth-first search
+    fn find_box_in_list_mut<'a, S: AsRef<str>>(
+        list: &'a mut Vec<MailBox>,
+        box_id: S,
+    ) -> Option<&'a mut MailBox> {
+        if list.len() < 1 {
+            return None;
+        };
+
+        let mut list_iter_mut = list.iter_mut();
+
+        let found = list_iter_mut.find(|mailbox| mailbox.id() == box_id.as_ref());
+
+        if found.is_none() {
+            let found = list_iter_mut.find_map(|mailbox| {
+                Self::find_box_in_list_mut(mailbox.children_mut(), box_id.as_ref())
+            });
+
+            found
+        } else {
+            found
+        }
+    }
+
     /// Finds a mailbox with a given id in a tree-like array list using breadth-first search
     fn find_box_in_list<'a, S: AsRef<str>>(
         list: &'a Vec<MailBox>,
@@ -296,7 +331,7 @@ mod tests {
 #[derive(Debug)]
 /// A struct useful for building a folder tree structure out of a flat mailbox array.
 pub struct MailBoxNode {
-    counts: Option<Counts>,
+    counts: Option<MessageCounts>,
     delimiter: Option<String>,
     children: HashMap<String, MailBoxNode>,
     selectable: bool,

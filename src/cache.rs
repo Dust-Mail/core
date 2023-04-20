@@ -30,15 +30,34 @@ impl<T> Cache<T> {
         self.cached.is_none() || self.refreshed.checked_sub(self.expiry_time).is_none()
     }
 
+    pub fn set(&mut self, value: T) {
+        self.cached = Some(value);
+        self.refreshed = Instant::now();
+    }
+
+    /// Get a mutable reference to the cached item and refresh it if it has expired.
+    pub async fn get_mut<R: Refresher<T>>(&mut self, refresher: &mut R) -> Result<&mut T> {
+        // If there is no cached value yet or the cache has expired, refresh it
+        if self.is_expired() {
+            let refreshed = refresher.refresh().await?;
+
+            self.set(refreshed)
+        }
+
+        match self.cached.as_mut() {
+            Some(cached) => Ok(cached),
+            // We check in the is_expired function whether self.cached is none, so it can never be none.
+            None => unreachable!(),
+        }
+    }
+
     /// Get the cached item and refresh it if it has expired.
     pub async fn get<R: Refresher<T>>(&mut self, refresher: &mut R) -> Result<&T> {
         // If there is no cached value yet or the cache has expired, refresh it
         if self.is_expired() {
             let refreshed = refresher.refresh().await?;
 
-            self.cached = Some(refreshed);
-
-            self.refreshed = Instant::now();
+            self.set(refreshed)
         }
 
         match self.cached.as_ref() {

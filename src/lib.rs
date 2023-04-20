@@ -2,6 +2,7 @@ mod cache;
 mod client;
 mod parse;
 mod tcp;
+mod utils;
 mod validate;
 
 #[cfg(feature = "detect")]

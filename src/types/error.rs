@@ -1,7 +1,7 @@
 use std::{error, fmt};
 
 #[cfg(feature = "pop")]
-use async_pop3::types::Error as PopError;
+use async_pop::types::Error as PopError;
 
 #[cfg(feature = "imap")]
 use async_imap::error::Error as ImapError;
@@ -100,7 +100,7 @@ impl From<ImapError> for Error {
     fn from(imap_error: ImapError) -> Self {
         Self::new(
             ErrorKind::Imap(imap_error),
-            format!("Error from imap server "),
+            format!("Error from imap server"),
         )
     }
 }

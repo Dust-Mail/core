@@ -124,11 +124,11 @@ async fn check_for_pop<T: ToSocketAddrs, S: AsRef<str>>(
         ConnectionSecurity::Tls => {
             let tls = TlsConnector::new();
 
-            async_pop3::connect(&addr, domain.as_ref(), &tls, connection_timeout)
+            async_pop::connect(&addr, domain.as_ref(), &tls, connection_timeout)
                 .await
                 .is_ok()
         }
-        _ => async_pop3::connect_plain(&addr, connection_timeout)
+        _ => async_pop::connect_plain(&addr, connection_timeout)
             .await
             .is_ok(),
     };

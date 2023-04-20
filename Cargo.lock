@@ -92,12 +92,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-pop3"
-version = "0.1.0"
-source = "git+https://github.com/Dust-Mail/async-pop#0042386ef962a00f26c2460effa453593b7fd2fc"
+name = "async-pop"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c861cf12a3d462d5d747be247d83dd766f69ba5409a0c6df26db62d71699a2a"
 dependencies = [
  "async-native-tls",
- "bytes",
  "tokio",
 ]
 
@@ -120,8 +120,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "autoconfig"
-version = "0.1.0"
-source = "git+https://github.com/Dust-Mail/autoconfig#beb7dafdafb1e5d9970baa54f66a3e7fab6bc1bc"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86902e8312861bee151681750675a32285673ec23345f3d3e73df8fd1de27101"
 dependencies = [
  "futures",
  "regex",
@@ -228,27 +229,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "core"
-version = "0.1.0"
-dependencies = [
- "ammonia",
- "async-imap",
- "async-native-tls",
- "async-pop3",
- "async-trait",
- "autoconfig",
- "chrono",
- "dotenv",
- "futures",
- "lettre",
- "mailparse",
- "regex",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "core-foundation"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -338,6 +318,27 @@ name = "dotenv"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
+
+[[package]]
+name = "dust-mail"
+version = "0.1.0"
+dependencies = [
+ "ammonia",
+ "async-imap",
+ "async-native-tls",
+ "async-pop",
+ "async-trait",
+ "autoconfig",
+ "chrono",
+ "dotenv",
+ "futures",
+ "lettre",
+ "mailparse",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "email-encoding"
