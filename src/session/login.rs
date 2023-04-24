@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 
 use crate::types::{ConnectionSecurity, IncomingClientType, OAuthCredentials};
@@ -182,9 +184,9 @@ impl FullLoginOptionsBuilder {
     }
 }
 
-impl Into<String> for FullLoginOptions {
+impl Display for FullLoginOptions {
     /// Creates an identifiable string from the credentials, excluding the password.
-    fn into(self) -> String {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let incoming = self.incoming_options();
 
         let username = match incoming.login_type() {
@@ -192,6 +194,8 @@ impl Into<String> for FullLoginOptions {
             LoginType::PasswordBased(password_creds) => password_creds.username(),
         };
 
-        format!("{}@{}:{}", username, incoming.domain(), incoming.port())
+        let identifier = format!("{}@{}:{}", username, incoming.domain(), incoming.port());
+
+        write!(f, "{}", identifier)
     }
 }
