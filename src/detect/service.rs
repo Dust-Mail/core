@@ -62,12 +62,12 @@ impl ServiceDetector {
             ConnectionSecurity::Tls => {
                 let connection = tcp::connect(&addr, domain, tcp_config.clone()).await?;
 
-                is_imap(connection).await?
+                ServiceDetector::is_imap(connection).await?
             }
             _ => {
                 let connection = tcp::connect_plain(&addr, tcp_config.clone()).await?;
 
-                is_imap(connection).await?
+                ServiceDetector::is_imap(connection).await?
             }
         };
 
@@ -163,21 +163,21 @@ impl ServiceDetector {
 
         #[cfg(feature = "imap")]
         {
-            let check_for_imap_future = check_for_imap(security, &addr, domain, &tcp_config);
+            let check_for_imap_future = Self::check_for_imap(security, &addr, domain, &tcp_config);
 
             checkers.push(check_for_imap_future.boxed());
         }
 
         #[cfg(feature = "pop")]
         {
-            let check_for_smtp_future = check_for_pop(security, &addr, domain, &tcp_config);
+            let check_for_smtp_future = Self::check_for_pop(security, &addr, domain, &tcp_config);
 
             checkers.push(check_for_smtp_future.boxed());
         }
 
         #[cfg(feature = "smtp")]
         {
-            let check_for_smtp_future = check_for_smtp(security, &addr, domain, &tcp_config);
+            let check_for_smtp_future = Self::check_for_smtp(security, &addr, domain, &tcp_config);
 
             checkers.push(check_for_smtp_future.boxed());
         }
@@ -201,7 +201,7 @@ mod test {
         types::ConnectionSecurity,
     };
 
-    use super::detect_server_config;
+    use super::ServiceDetector;
 
     #[tokio::test]
     async fn client_type() {
@@ -213,16 +213,24 @@ mod test {
         #[cfg(feature = "imap")]
         {
             assert_eq!(
-                detect_server_config(&Socket::new(domain, imap_port, ConnectionSecurity::Tls))
-                    .await
-                    .unwrap(),
+                ServiceDetector::detect_server_config(&Socket::new(
+                    domain,
+                    imap_port,
+                    ConnectionSecurity::Tls
+                ))
+                .await
+                .unwrap(),
                 Some(ServerConfigType::Imap),
             );
 
             assert_ne!(
-                detect_server_config(&Socket::new(domain, pop_port, ConnectionSecurity::Tls))
-                    .await
-                    .unwrap(),
+                ServiceDetector::detect_server_config(&Socket::new(
+                    domain,
+                    pop_port,
+                    ConnectionSecurity::Tls
+                ))
+                .await
+                .unwrap(),
                 Some(ServerConfigType::Imap),
             );
         }
@@ -230,16 +238,24 @@ mod test {
         #[cfg(feature = "pop")]
         {
             assert_eq!(
-                detect_server_config(&Socket::new(domain, pop_port, ConnectionSecurity::Tls))
-                    .await
-                    .unwrap(),
+                ServiceDetector::detect_server_config(&Socket::new(
+                    domain,
+                    pop_port,
+                    ConnectionSecurity::Tls
+                ))
+                .await
+                .unwrap(),
                 Some(ServerConfigType::Pop),
             );
 
             assert_ne!(
-                detect_server_config(&Socket::new(domain, imap_port, ConnectionSecurity::Tls))
-                    .await
-                    .unwrap(),
+                ServiceDetector::detect_server_config(&Socket::new(
+                    domain,
+                    imap_port,
+                    ConnectionSecurity::Tls
+                ))
+                .await
+                .unwrap(),
                 Some(ServerConfigType::Pop),
             );
         }
@@ -247,7 +263,7 @@ mod test {
         #[cfg(feature = "smtp")]
         {
             assert_eq!(
-                detect_server_config(&Socket::new(
+                ServiceDetector::detect_server_config(&Socket::new(
                     domain,
                     smtp_port,
                     ConnectionSecurity::StartTls
@@ -258,9 +274,13 @@ mod test {
             );
 
             assert_ne!(
-                detect_server_config(&Socket::new(domain, imap_port, ConnectionSecurity::Tls))
-                    .await
-                    .unwrap(),
+                ServiceDetector::detect_server_config(&Socket::new(
+                    domain,
+                    imap_port,
+                    ConnectionSecurity::Tls
+                ))
+                .await
+                .unwrap(),
                 Some(ServerConfigType::Smtp),
             );
         }

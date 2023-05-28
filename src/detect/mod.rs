@@ -18,7 +18,7 @@ use types::{AuthenticationType, ConfigType, ServerConfig, ServerConfigType};
 
 pub use types::Config;
 
-use self::{service::detect_server_config, types::Socket};
+use self::{service::ServiceDetector, types::Socket};
 
 pub struct DetectClient;
 
@@ -33,7 +33,7 @@ impl DetectClient {
         let mut tasks = Vec::new();
 
         for socket in sockets.iter() {
-            tasks.push(detect_server_config(socket))
+            tasks.push(ServiceDetector::detect_server_config(socket))
         }
 
         let results = join_all(tasks).await;
