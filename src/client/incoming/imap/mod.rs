@@ -89,9 +89,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MessageC
     for MessageCountRefresher<'_, S>
 {
     async fn refresh(&mut self) -> Result<MessageCounts> {
-        let imap_counts = self.session.status(self.box_id, STATUS_ITEMS).await?;
-
-        println!("{:?}", imap_counts);
+        let imap_counts = self.session.examine(self.box_id).await?;
 
         let counts = MessageCounts::from(imap_counts);
 
@@ -233,14 +231,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
 
     /// Select a given box if it hasn't already been selected, otherwise return the already selected box.
     async fn select(&mut self, box_id: &str) -> Result<&MailBox> {
-        debug!("Selecting box: {}", box_id);
-
         let box_id = box_id.trim();
 
         let box_is_selected_already = self.selected_box.is_some();
 
         // If there is no box selected yet or the box we have selected is not the box when want to select, we have to request the server.
         if !box_is_selected_already || self.selected_box.as_ref().unwrap() != box_id {
+            debug!("Selecting box: {}", box_id);
+
             let session = self.get_session_mut();
 
             // If there is already a box selected we must close it first
