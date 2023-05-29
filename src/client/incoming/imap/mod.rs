@@ -21,13 +21,14 @@ use crate::types::{
 const QUERY_PREVIEW: &str = "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE UID)";
 const QUERY_FULL_MESSAGE: &str = "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE RFC822 UID)";
 
-const STATUS_ITEMS: &str = "(MESSAGES UNSEEN)";
+const STATUS_ITEMS: &str = "(UNSEEN MESSAGES)";
 
 const REFRESH_BOX_LIST: Duration = Duration::from_secs(30);
 const REFRESH_MESSAGE_COUNT: Duration = Duration::from_secs(60);
 
 struct BoxListRefresher<'a, S: AsyncRead + AsyncWrite + Unpin + Debug + Send> {
     session: &'a mut async_imap::Session<S>,
+    message_count: &'a mut HashMap<String, Cache<MessageCounts>>,
 }
 
 #[async_trait]
@@ -36,18 +37,43 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MailBoxL
 {
     async fn refresh(&mut self) -> Result<MailBoxList> {
         debug!("Refreshing box list...");
-        let mut mailbox_stream = self.session.list(None, Some("*")).await?;
 
         // A planar graph of all of the mailboxes in the users account
         let mut mailboxes_planar: Vec<MailBox> = Vec::new();
 
-        while let Some(mailbox) = mailbox_stream.next().await {
-            if let Ok(mailbox) = mailbox {
-                mailboxes_planar.push(MailBox::from(mailbox));
+        {
+            let mut mailbox_stream = self.session.list(None, Some("*")).await?;
+
+            while let Some(mailbox) = mailbox_stream.next().await {
+                if let Ok(mailbox) = mailbox {
+                    mailboxes_planar.push(MailBox::from(mailbox));
+                }
             }
         }
 
-        let boxes = MailBoxList::new(mailboxes_planar);
+        let mut boxes = MailBoxList::new(mailboxes_planar);
+
+        for mailbox_mut in boxes.get_vec_mut() {
+            if *mailbox_mut.selectable() {
+                let message_counts_cache = self
+                    .message_count
+                    .entry(mailbox_mut.id().to_string())
+                    .or_insert(Cache::new(REFRESH_MESSAGE_COUNT));
+
+                let mut message_count_refresher = MessageCountRefresher {
+                    box_id: mailbox_mut.id(),
+                    session: &mut self.session,
+                };
+
+                let message_count = message_counts_cache
+                    .get(&mut message_count_refresher)
+                    .await?;
+
+                // debug!("{:?}", message_count);
+
+                mailbox_mut.create_counts(message_count.clone())
+            }
+        }
 
         Ok(boxes)
     }
@@ -64,6 +90,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MessageC
 {
     async fn refresh(&mut self) -> Result<MessageCounts> {
         let imap_counts = self.session.status(self.box_id, STATUS_ITEMS).await?;
+
+        println!("{:?}", imap_counts);
 
         let counts = MessageCounts::from(imap_counts);
 
@@ -163,6 +191,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
     async fn get_mail_box_list(&mut self) -> Result<&MailBoxList> {
         let mut refresher = BoxListRefresher {
             session: &mut self.session,
+            message_count: &mut self.message_count,
         };
 
         let mail_box_list = self.box_list.get(&mut refresher).await?;
@@ -173,49 +202,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
     async fn get_mail_box_list_mut(&mut self) -> Result<&mut MailBoxList> {
         let mut refresher = BoxListRefresher {
             session: &mut self.session,
+            message_count: &mut self.message_count,
         };
 
         let mail_box_list_mut = self.box_list.get_mut(&mut refresher).await?;
 
         Ok(mail_box_list_mut)
-    }
-
-    /// Returns the message count for a given mailbox.
-    ///
-    /// Optionially set a value instead of just retrieving one.
-    async fn get_message_count<B: AsRef<str>>(
-        &mut self,
-        box_id: B,
-        to_set: Option<MessageCounts>,
-    ) -> Result<&MessageCounts> {
-        let mut refresher = MessageCountRefresher {
-            session: &mut self.session,
-            box_id: box_id.as_ref(),
-        };
-
-        // If there is no cache yet, create one.
-        if self.message_count.get(box_id.as_ref()).is_none() {
-            self.message_count.insert(
-                box_id.as_ref().to_string(),
-                Cache::new(REFRESH_MESSAGE_COUNT),
-            );
-        }
-
-        match self.message_count.get_mut(box_id.as_ref()) {
-            Some(message_count_cache) => {
-                // If the caller provided us with data to set instead of to retrieve, the we set it.
-                if let Some(to_set) = to_set {
-                    message_count_cache.set(to_set);
-                };
-
-                let message_count = message_count_cache.get(&mut refresher).await?;
-
-                Ok(message_count)
-            }
-            None => {
-                unreachable!()
-            }
-        }
     }
 
     /// This function will check if a box with a given box id is actually selectable, throwing an error if it is not.
@@ -264,7 +256,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
 
             if let Some(box_mut) = box_list_mut.get_box_mut(box_id) {
                 debug!("Creating counts for: {:?}", box_mut);
-                box_mut.create_counts(imap_counts);
+                box_mut.create_imap_counts(imap_counts);
             }
         };
 
@@ -441,8 +433,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession fo
             }
         }
 
-        // TODO: Fix this
-        let fetch = fetched.first().unwrap();
+        if fetched.len() < 1 {
+            return Err(Error::new(
+                ErrorKind::MessageNotFound,
+                "Could not find a message with that id",
+            ));
+        };
+
+        let fetch = match fetched.first() {
+            Some(first) => first,
+            None => unreachable!(),
+        };
 
         parse::fetch_to_message(fetch).await
     }
@@ -489,7 +490,7 @@ mod tests {
     async fn get_mailbox() {
         let mut session = create_test_session().await;
 
-        let box_name = "Web";
+        let box_name = "Inbox";
 
         let mailbox = session.get(box_name).await.unwrap();
 
@@ -519,9 +520,7 @@ mod tests {
 
         let box_list = session.box_list().await.unwrap();
 
-        for mailbox in box_list {
-            println!("{}", mailbox.id());
-        }
+        println!("{:?}", box_list);
 
         session.logout().await.unwrap();
     }
@@ -530,12 +529,12 @@ mod tests {
     async fn get_message() {
         let mut session = create_test_session().await;
 
-        let msg_id = "1113";
+        let msg_id = "1";
         let box_id = "INBOX";
 
         let message = session.get_message(box_id, msg_id).await.unwrap();
 
-        println!("{}", message.content().text().unwrap());
+        println!("{}", message.id());
 
         session.logout().await.unwrap();
     }

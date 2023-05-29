@@ -74,10 +74,14 @@ impl MailBox {
 
     #[cfg(feature = "imap")]
     /// Create a counts struct from a given imap mailbox struct and update the local attribute.
-    pub fn create_counts(&mut self, imap_counts: ImapCounts) {
+    pub fn create_imap_counts(&mut self, imap_counts: ImapCounts) {
         let counts = MessageCounts::from(imap_counts);
 
         self.counts = Some(counts);
+    }
+
+    pub fn create_counts(&mut self, message_counts: MessageCounts) {
+        self.counts = Some(message_counts);
     }
 
     /// Whether the mailbox contains messages and can be selected.
@@ -225,6 +229,10 @@ impl MailBoxList {
 
     pub fn get_vec(&self) -> &Vec<MailBox> {
         &self.list
+    }
+
+    pub fn get_vec_mut(&mut self) -> &mut Vec<MailBox> {
+        &mut self.list
     }
 
     pub fn get_box<S: AsRef<str>>(&self, box_id: S) -> Option<&MailBox> {

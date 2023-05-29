@@ -18,6 +18,7 @@ use tokio::{task::JoinError, time::error::Elapsed};
 
 #[derive(Debug)]
 pub enum ErrorKind {
+    MessageNotFound,
     /// The server responded with some unexpected data.
     UnexpectedBehavior,
     /// The requested feature/function is unsupported for this client type.
