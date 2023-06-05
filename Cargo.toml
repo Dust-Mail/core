@@ -7,13 +7,12 @@ edition = "2021"
 
 [dependencies]
 # Imap
-async-imap = {version = "0.6.0", default-features = false, features = ["runtime-tokio"], optional = true }
+async-imap = { version = "0.6.0", default-features = false, features = [
+	"runtime-tokio",
+], optional = true }
 
 # Pop
-async-pop = {version = "0.1", optional = true }
-
-# Smtp
-lettre = { version = "0.10", optional = true }
+async-pop = { version = "0.1", optional = true }
 
 # Autodetect service
 autoconfig = { version = "0.2", optional = true }
@@ -22,14 +21,16 @@ autoconfig = { version = "0.2", optional = true }
 mailparse = "0.14"
 
 # Serde
-serde = {version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Time
 chrono = "0.4"
 
 # Tls
-async-native-tls = {version = "0.4.0", default-features = false, features = ["runtime-tokio"] }
+async-native-tls = { version = "0.4.0", default-features = false, features = [
+	"runtime-tokio",
+] }
 
 # Async
 tokio = { version = "1", features = ["full"] }
@@ -50,7 +51,7 @@ default = ["imap", "pop", "detect", "smtp"]
 detect = ["autoconfig"]
 autoconfig = ["dep:autoconfig"]
 
-smtp = ["dep:lettre"]
+smtp = []
 
 pop = ["dep:async-pop"]
-imap = ["dep:async-imap"] 
+imap = ["dep:async-imap"]
