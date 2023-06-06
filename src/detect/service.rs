@@ -186,10 +186,7 @@ impl ServiceDetector {
 
         match result {
             Ok((config_type, _remaining)) => Ok(Some(config_type)),
-            Err(err) => match err.kind() {
-                ErrorKind::Timeout(_) => Ok(None),
-                _ => Err(err),
-            },
+            Err(_) => Ok(None),
         }
     }
 }
