@@ -54,6 +54,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MailBoxL
 
         let mut boxes = MailBoxList::new(mailboxes_planar);
 
+        let selected_box_before_refresh = self.selected_box.clone();
+
         for mailbox_mut in boxes.get_vec_mut() {
             if *mailbox_mut.selectable() {
                 let message_counts_cache = self
@@ -77,6 +79,24 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MailBoxL
             }
         }
 
+        // This is kind of a hacky work around we have to use,
+        // as refreshing the message count will select a different mailbox because we cannot use the STATUS command at the moment
+        if selected_box_before_refresh != *self.selected_box {
+            debug!(
+                "Selected box ({:?}, {:?}) changed when updating message counts, returning to old box",
+                selected_box_before_refresh,
+				self.selected_box
+            );
+            if let Some(selected_box_before_refresh) = selected_box_before_refresh.as_ref() {
+                self.session.select(selected_box_before_refresh).await?;
+            } else {
+                debug!("Closed the box");
+                self.session.close().await?;
+            }
+
+            *self.selected_box = selected_box_before_refresh
+        }
+
         Ok(boxes)
     }
 }
@@ -93,6 +113,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MessageC
 {
     async fn refresh(&mut self) -> Result<MessageCounts> {
         debug!("Refreshing message counts for {}", self.box_id);
+        // TODO: use STATUS command
+        // The status command always returns `total: 0` and `unseen: 0`, so for now we use examine to retrieve the message counts
         let imap_counts = self.session.examine(self.box_id).await?;
 
         let counts = MessageCounts::from(imap_counts);
@@ -247,7 +269,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
 
         let box_is_selected_already = self.selected_box.is_some();
 
-        // If there is no box selected yet or the box we have selected is not the box when want to select, we have to request the server.
+        // If there is no box selected yet or the box we have selected is not the box we want to select, we have to request the server.
         if !box_is_selected_already || self.selected_box.as_ref().unwrap() != box_id {
             debug!("Selecting box: {}", box_id);
 
