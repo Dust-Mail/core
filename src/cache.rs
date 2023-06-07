@@ -27,7 +27,9 @@ impl<T> Cache<T> {
 
     /// Whether the cache has expired.
     pub fn is_expired(&self) -> bool {
-        self.cached.is_none() || self.refreshed.checked_sub(self.expiry_time).is_none()
+        let is_timed_out = Instant::now().duration_since(self.refreshed) > self.expiry_time;
+
+        self.cached.is_none() || is_timed_out
     }
 
     pub fn set(&mut self, value: T) {

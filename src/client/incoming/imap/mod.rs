@@ -21,9 +21,9 @@ use crate::types::{
 const QUERY_PREVIEW: &str = "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE UID)";
 const QUERY_FULL_MESSAGE: &str = "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE RFC822 UID)";
 
-const STATUS_ITEMS: &str = "(UNSEEN MESSAGES)";
+// const STATUS_ITEMS: &str = "(UNSEEN MESSAGES)";
 
-const REFRESH_BOX_LIST: Duration = Duration::from_secs(30);
+const REFRESH_BOX_LIST: Duration = Duration::from_secs(10);
 const REFRESH_MESSAGE_COUNT: Duration = Duration::from_secs(60);
 
 struct BoxListRefresher<'a, S: AsyncRead + AsyncWrite + Unpin + Debug + Send> {
@@ -89,6 +89,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MessageC
     for MessageCountRefresher<'_, S>
 {
     async fn refresh(&mut self) -> Result<MessageCounts> {
+        debug!("Refreshing message counts for {}", self.box_id);
         let imap_counts = self.session.examine(self.box_id).await?;
 
         let counts = MessageCounts::from(imap_counts);
@@ -248,13 +249,20 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
 
             let imap_counts = session.select(&box_id).await?;
 
+            let message_counts = MessageCounts::from(imap_counts);
+
+            // Update the cached value so we don't refetch it in the near future.
+            if let Some(cached_message_count) = self.message_count.get_mut(box_id) {
+                cached_message_count.set(message_counts.clone());
+            }
+
             self.selected_box = Some(String::from(box_id));
 
             let box_list_mut = self.get_mail_box_list_mut().await?;
 
             if let Some(box_mut) = box_list_mut.get_box_mut(box_id) {
                 debug!("Creating counts for: {:?}", box_mut);
-                box_mut.create_imap_counts(imap_counts);
+                box_mut.create_counts(message_counts);
             }
         };
 
@@ -379,17 +387,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession fo
 
             let session = self.get_session_mut();
 
-            let mut preview_stream = session.fetch(sequence, QUERY_PREVIEW).await?;
-
             let mut previews: Vec<Preview> =
                 Vec::with_capacity((end.saturating_sub(start)) as usize);
 
-            while let Some(fetch) = preview_stream.next().await {
-                let fetch = fetch?;
+            {
+                let mut preview_stream = session.fetch(sequence, QUERY_PREVIEW).await?;
 
-                let preview = parse::fetch_to_preview(&fetch)?;
+                while let Some(fetch) = preview_stream.next().await {
+                    let fetch = fetch?;
 
-                previews.push(preview);
+                    let preview = parse::fetch_to_preview(&fetch)?;
+
+                    previews.push(preview);
+                }
             }
 
             Ok(previews)
