@@ -21,13 +21,14 @@ use crate::types::{
 const QUERY_PREVIEW: &str = "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE UID)";
 const QUERY_FULL_MESSAGE: &str = "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE RFC822 UID)";
 
-// const STATUS_ITEMS: &str = "(UNSEEN MESSAGES)";
+const STATUS_ITEMS: &str = "(UNSEEN MESSAGES)";
 
 const REFRESH_BOX_LIST: Duration = Duration::from_secs(10);
 const REFRESH_MESSAGE_COUNT: Duration = Duration::from_secs(60);
 
 struct BoxListRefresher<'a, S: AsyncRead + AsyncWrite + Unpin + Debug + Send> {
     session: &'a mut async_imap::Session<S>,
+    selected_box: &'a mut Option<String>,
     message_count: &'a mut HashMap<String, Cache<MessageCounts>>,
 }
 
@@ -61,6 +62,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MailBoxL
                     .or_insert(Cache::new(REFRESH_MESSAGE_COUNT));
 
                 let mut message_count_refresher = MessageCountRefresher {
+                    selected_box: &mut self.selected_box,
                     box_id: mailbox_mut.id(),
                     session: &mut self.session,
                 };
@@ -81,6 +83,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MailBoxL
 
 struct MessageCountRefresher<'a, S: AsyncRead + AsyncWrite + Unpin + Debug + Send> {
     session: &'a mut async_imap::Session<S>,
+    selected_box: &'a mut Option<String>,
     box_id: &'a str,
 }
 
@@ -93,6 +96,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MessageC
         let imap_counts = self.session.examine(self.box_id).await?;
 
         let counts = MessageCounts::from(imap_counts);
+
+        *self.selected_box = Some(self.box_id.to_string());
 
         Ok(counts)
     }
@@ -117,7 +122,11 @@ pub async fn connect<S: AsRef<str>, P: Into<u16>>(
 ) -> Result<ImapClient<TlsStream<TcpStream>>> {
     let tls = TlsConnector::new();
 
-    let client = async_imap::connect((server.as_ref(), port.into()), server.as_ref(), tls).await?;
+    let tcp_stream = TcpStream::connect((server.as_ref(), port.into())).await?;
+
+    let tls_stream = tls.connect(server.as_ref(), tcp_stream).await?;
+
+    let client = async_imap::Client::new(tls_stream);
 
     let imap_client = ImapClient { client };
 
@@ -183,12 +192,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapClient<S> {
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
-    fn get_session_mut(&mut self) -> &mut async_imap::Session<S> {
+    pub fn inner_mut(&mut self) -> &mut async_imap::Session<S> {
         &mut self.session
     }
 
     async fn get_mail_box_list(&mut self) -> Result<&MailBoxList> {
         let mut refresher = BoxListRefresher {
+            selected_box: &mut self.selected_box,
             session: &mut self.session,
             message_count: &mut self.message_count,
         };
@@ -200,6 +210,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
 
     async fn get_mail_box_list_mut(&mut self) -> Result<&mut MailBoxList> {
         let mut refresher = BoxListRefresher {
+            selected_box: &mut self.selected_box,
             session: &mut self.session,
             message_count: &mut self.message_count,
         };
@@ -240,7 +251,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
         if !box_is_selected_already || self.selected_box.as_ref().unwrap() != box_id {
             debug!("Selecting box: {}", box_id);
 
-            let session = self.get_session_mut();
+            let session = self.inner_mut();
 
             // If there is already a box selected we must close it first
             if box_is_selected_already {
@@ -282,7 +293,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
 #[async_trait]
 impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession for ImapSession<S> {
     async fn logout(&mut self) -> Result<()> {
-        let session = self.get_session_mut();
+        let session = self.inner_mut();
 
         session.logout().await?;
 
@@ -310,7 +321,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession fo
     }
 
     async fn delete(&mut self, box_id: &str) -> Result<()> {
-        let session = self.get_session_mut();
+        let session = self.inner_mut();
 
         session.delete(box_id).await?;
 
@@ -342,7 +353,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession fo
             None => new_name.to_string(),
         };
 
-        let session = self.get_session_mut();
+        let session = self.inner_mut();
 
         session.close().await?;
 
@@ -352,7 +363,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession fo
     }
 
     async fn create(&mut self, box_id: &str) -> Result<()> {
-        let session = self.get_session_mut();
+        let session = self.inner_mut();
 
         session.create(box_id).await?;
 
@@ -385,7 +396,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession fo
 
             let sequence = format!("{}:{}", sequence_start, sequence_end);
 
-            let session = self.get_session_mut();
+            let session = self.inner_mut();
 
             let mut previews: Vec<Preview> =
                 Vec::with_capacity((end.saturating_sub(start)) as usize);
@@ -413,7 +424,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession fo
 
         self.select(box_id).await?;
 
-        let session = self.get_session_mut();
+        let session = self.inner_mut();
 
         let mut fetch_stream = session.uid_fetch(msg_id, QUERY_FULL_MESSAGE).await?;
 
@@ -461,6 +472,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession fo
 mod tests {
     use async_native_tls::TlsStream;
 
+    use env_logger::Env;
     use tokio::net::TcpStream;
 
     use super::ImapSession;
@@ -524,6 +536,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_box_list() {
+        env_logger::Builder::from_env(Env::default().default_filter_or("trace")).init();
         let mut session = create_test_session().await;
 
         let box_list = session.box_list().await.unwrap();

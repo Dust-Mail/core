@@ -58,13 +58,12 @@ dependencies = [
 
 [[package]]
 name = "async-imap"
-version = "0.6.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31dd46675b8c5a2ecadd4ef690c84966eacf21b1e2327373a0d167494d1a1d28"
+checksum = "d11e163a705d0c809dfc886eee95df5117c758539c940c0fe9aa3aa4da5388ce"
 dependencies = [
  "async-channel",
- "async-native-tls",
- "base64 0.13.1",
+ "base64 0.21.0",
  "byte-pool",
  "chrono",
  "futures",

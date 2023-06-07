@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 # Imap
-async-imap = { version = "0.6.0", default-features = false, features = [
+async-imap = { version = "0.8.0", default-features = false, features = [
 	"runtime-tokio",
 ], optional = true }
 
