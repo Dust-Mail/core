@@ -10,6 +10,4 @@ pub mod detect;
 
 pub mod types;
 
-pub mod session;
-
-pub use client::incoming::{IncomingClientBuilder, IncomingSession};
+pub use client::{create, Credentials, EmailClient, IncomingEmailProtocol, OutgoingEmailProtocol};

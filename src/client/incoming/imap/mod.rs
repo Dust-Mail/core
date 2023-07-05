@@ -1,3 +1,5 @@
+mod keep_alive;
+mod oauth;
 mod parse;
 use std::collections::HashMap;
 // use std::collections::HashMap;
@@ -11,23 +13,26 @@ use tokio::net::TcpStream;
 use tokio::time::Duration;
 
 use crate::cache::{Cache, Refresher};
-use crate::client::incoming::IncomingSession;
+use crate::client::protocol::{Credentials, ImapCredentials, IncomingProtocol, ServerCredentials};
 use crate::debug;
 use crate::types::{
-    Error, ErrorKind, MailBox, MailBoxList, Message, MessageCounts, OAuthCredentials, Preview,
+    ConnectionSecurity, Error, ErrorKind, MailBox, MailBoxList, Message, MessageCounts, Preview,
     Result,
 };
+
+use self::keep_alive::ImapSessionWithKeepAlive;
+use self::oauth::OAuthCredentials;
 
 const QUERY_PREVIEW: &str = "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE UID)";
 const QUERY_FULL_MESSAGE: &str = "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE RFC822 UID)";
 
-const STATUS_ITEMS: &str = "(UNSEEN MESSAGES)";
+// const STATUS_ITEMS: &str = "(UNSEEN MESSAGES)";
 
 const REFRESH_BOX_LIST: Duration = Duration::from_secs(10);
 const REFRESH_MESSAGE_COUNT: Duration = Duration::from_secs(60);
 
-struct BoxListRefresher<'a, S: AsyncRead + AsyncWrite + Unpin + Debug + Send> {
-    session: &'a mut async_imap::Session<S>,
+struct BoxListRefresher<'a, S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> {
+    session: &'a mut ImapSessionWithKeepAlive<S>,
     selected_box: &'a mut Option<String>,
     message_count: &'a mut HashMap<String, Cache<MessageCounts>>,
 }
@@ -130,7 +135,7 @@ pub struct ImapClient<S: AsyncRead + AsyncWrite + Unpin + Debug + Send> {
 }
 
 pub struct ImapSession<S: AsyncWrite + AsyncRead + Unpin + Debug + Send + Sync> {
-    session: async_imap::Session<S>,
+    session: ImapSessionWithKeepAlive<S>,
     /// Counts per box
     message_count: HashMap<String, Cache<MessageCounts>>,
     box_list: Cache<MailBoxList>,
@@ -166,19 +171,61 @@ pub async fn connect_plain<S: AsRef<str>, P: Into<u16>>(
     Ok(ImapClient { client })
 }
 
+async fn create_session<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync>(
+    imap_client: ImapClient<S>,
+    credentials: &Credentials,
+) -> Result<ImapSession<S>> {
+    let imap_session = match credentials {
+        Credentials::OAuth { username, token } => imap_client.oauth2_login(username, token).await?,
+        Credentials::Password { username, password } => {
+            imap_client.login(username, password).await?
+        }
+    };
+
+    Ok(imap_session)
+}
+
+/// Creates a new imap client from a given set of credentials
+pub async fn create(credentials: &ImapCredentials) -> Result<Box<dyn IncomingProtocol>> {
+    match credentials.server().security() {
+        ConnectionSecurity::Tls => {
+            let imap_client =
+                connect(credentials.server().domain(), credentials.server().port()).await?;
+
+            let session = create_session(imap_client, &credentials.credentials()).await?;
+
+            Ok(Box::new(session))
+        }
+        _ => {
+            let imap_client =
+                connect_plain(credentials.server().domain(), credentials.server().port()).await?;
+
+            let session = create_session(imap_client, &credentials.credentials()).await?;
+
+            Ok(Box::new(session))
+        }
+    }
+}
+
 impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapClient<S> {
     fn new_imap_session(session: async_imap::Session<S>) -> ImapSession<S> {
         let box_list_cache = Cache::new(REFRESH_BOX_LIST);
 
+        let session_with_keep_alive = ImapSessionWithKeepAlive::new(session);
+
         ImapSession {
-            session,
+            session: session_with_keep_alive,
             message_count: HashMap::new(),
             box_list: box_list_cache,
             selected_box: None,
         }
     }
 
-    pub async fn login<T: AsRef<str>>(self, username: T, password: T) -> Result<ImapSession<S>> {
+    pub async fn login<U: AsRef<str>, P: AsRef<str>>(
+        self,
+        username: U,
+        password: P,
+    ) -> Result<ImapSession<S>> {
         let session = self
             .client
             .login(username, password)
@@ -195,10 +242,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapClient<S> {
         Ok(imap_session)
     }
 
-    pub async fn oauth2_login(self, login: OAuthCredentials) -> Result<ImapSession<S>> {
+    pub async fn oauth2_login<U: AsRef<str>, T: AsRef<str>>(
+        self,
+        user: U,
+        token: T,
+    ) -> Result<ImapSession<S>> {
+        let auth = OAuthCredentials::new(user.as_ref(), token.as_ref());
+
         let session = self
             .client
-            .authenticate("XOAUTH2", login)
+            .authenticate("XOAUTH2", auth)
             .await
             .map_err(|(error, _)| {
                 Error::new(
@@ -218,7 +271,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
         &mut self.session
     }
 
-    async fn get_mail_box_list(&mut self) -> Result<&MailBoxList> {
+    async fn get_mailbox_list(&mut self) -> Result<&MailBoxList> {
         let mut refresher = BoxListRefresher {
             selected_box: &mut self.selected_box,
             session: &mut self.session,
@@ -230,7 +283,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
         Ok(mail_box_list)
     }
 
-    async fn get_mail_box_list_mut(&mut self) -> Result<&mut MailBoxList> {
+    async fn get_mailbox_list_mut(&mut self) -> Result<&mut MailBoxList> {
         let mut refresher = BoxListRefresher {
             selected_box: &mut self.selected_box,
             session: &mut self.session,
@@ -244,7 +297,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
 
     /// This function will check if a box with a given box id is actually selectable, throwing an error if it is not.
     async fn check_selectable(&mut self, box_id: &str) -> Result<()> {
-        let box_list = self.get_mail_box_list().await?;
+        let box_list = self.get_mailbox_list().await?;
 
         let requested_box = box_list.get_box(box_id);
 
@@ -291,7 +344,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
 
             self.selected_box = Some(String::from(box_id));
 
-            let box_list_mut = self.get_mail_box_list_mut().await?;
+            let box_list_mut = self.get_mailbox_list_mut().await?;
 
             if let Some(box_mut) = box_list_mut.get_box_mut(box_id) {
                 debug!("Creating counts for: {:?}", box_mut);
@@ -299,7 +352,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
             }
         };
 
-        let box_list = self.get_mail_box_list().await?;
+        let box_list = self.get_mailbox_list().await?;
 
         if let Some(found_box) = box_list.get_box(box_id) {
             Ok(found_box)
@@ -313,36 +366,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
 }
 
 #[async_trait]
-impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession for ImapSession<S> {
-    async fn logout(&mut self) -> Result<()> {
-        let session = self.inner_mut();
+impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSession<S> {
+    async fn get_mailbox_list(&mut self) -> Result<&MailBoxList> {
+        let mailbox_list = self.get_mailbox_list().await?;
 
-        session.logout().await?;
-
-        Ok(())
+        Ok(mailbox_list)
     }
 
-    async fn box_list(&mut self) -> Result<&Vec<MailBox>> {
-        let mailbox_list = self.get_mail_box_list().await?;
-
-        Ok(mailbox_list.get_vec())
-    }
-
-    async fn get(&mut self, box_id: &str) -> Result<&MailBox> {
-        let box_id = box_id.trim();
-
-        let box_list = self.get_mail_box_list().await?;
-
-        match box_list.get_box(&box_id) {
-            Some(found_mailbox) => Ok(found_mailbox),
-            None => Err(Error::new(
-                ErrorKind::MailBoxNotFound,
-                format!("Could not find a mailbox with id '{}'", &box_id),
-            )),
-        }
-    }
-
-    async fn delete(&mut self, box_id: &str) -> Result<()> {
+    async fn delete_mailbox(&mut self, box_id: &str) -> Result<()> {
         let session = self.inner_mut();
 
         session.delete(box_id).await?;
@@ -350,8 +381,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession fo
         Ok(())
     }
 
-    async fn rename(&mut self, box_id: &str, new_name: &str) -> Result<()> {
-        let mailbox = self.get(box_id).await?;
+    async fn rename_mailbox(&mut self, box_id: &str, new_name: &str) -> Result<()> {
+        let mailbox_list = self.get_mailbox_list().await?;
+
+        let mailbox = mailbox_list.get_box(box_id).ok_or(Error::new(
+            ErrorKind::MessageNotFound,
+            format!("Message with id {} could not be found", box_id),
+        ))?;
 
         let new_name = match mailbox.delimiter() {
             Some(delimiter) => {
@@ -384,7 +420,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession fo
         Ok(())
     }
 
-    async fn create(&mut self, box_id: &str) -> Result<()> {
+    async fn create_mailbox(&mut self, box_id: &str) -> Result<()> {
         let session = self.inner_mut();
 
         session.create(box_id).await?;
@@ -392,7 +428,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingSession fo
         Ok(())
     }
 
-    async fn messages(&mut self, box_id: &str, start: u32, end: u32) -> Result<Vec<Preview>> {
+    async fn get_messages(
+        &mut self,
+        box_id: &str,
+        start: usize,
+        end: usize,
+    ) -> Result<Vec<Preview>> {
         self.check_selectable(box_id).await?;
 
         let selected_box = self.select(&box_id).await?;
@@ -497,9 +538,9 @@ mod tests {
     use env_logger::Env;
     use tokio::net::TcpStream;
 
-    use super::ImapSession;
+    use crate::client::protocol::IncomingProtocol;
 
-    use crate::client::incoming::IncomingSession;
+    use super::ImapSession;
 
     use dotenv::dotenv;
 
@@ -523,22 +564,18 @@ mod tests {
 
     #[tokio::test]
     async fn login() {
-        let mut session = create_test_session().await;
-
-        session.logout().await.unwrap();
+        create_test_session().await;
     }
 
     #[tokio::test]
     async fn get_mailbox() {
         let mut session = create_test_session().await;
 
-        let box_name = "Inbox";
+        let box_name = "INBOX";
 
-        let mailbox = session.get(box_name).await.unwrap();
+        let mailbox_list = session.get_mailbox_list().await.unwrap();
 
-        println!("{:?}", mailbox);
-
-        session.logout().await.unwrap();
+        println!("{:?}", mailbox_list.get_box(box_name));
     }
 
     #[tokio::test]
@@ -547,13 +584,11 @@ mod tests {
 
         let box_name = "INBOX";
 
-        let messages = session.messages(box_name, 0, 10).await.unwrap();
+        let messages = session.get_messages(box_name, 0, 10).await.unwrap();
 
         for preview in messages.into_iter() {
             println!("{}", preview.sent().unwrap());
         }
-
-        session.logout().await.unwrap();
     }
 
     #[tokio::test]
@@ -561,11 +596,9 @@ mod tests {
         env_logger::Builder::from_env(Env::default().default_filter_or("trace")).init();
         let mut session = create_test_session().await;
 
-        let box_list = session.box_list().await.unwrap();
+        let box_list = session.get_mailbox_list().await.unwrap();
 
         println!("{:?}", box_list);
-
-        session.logout().await.unwrap();
     }
 
     #[tokio::test]
@@ -578,8 +611,6 @@ mod tests {
         let message = session.get_message(box_id, msg_id).await.unwrap();
 
         println!("{}", message.id());
-
-        session.logout().await.unwrap();
     }
 
     #[tokio::test]
@@ -589,8 +620,6 @@ mod tests {
         let new_box_name = "Delivery";
         let box_id = "Test";
 
-        session.rename(box_id, new_box_name).await.unwrap();
-
-        session.logout().await.unwrap();
+        session.rename_mailbox(box_id, new_box_name).await.unwrap();
     }
 }

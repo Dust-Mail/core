@@ -22,29 +22,32 @@ pub struct MailBox {
 #[derive(Debug, Default, Clone, Serialize, PartialEq, Eq)]
 /// A struct that holds the count for the total amount messages and the total amount of unseen messages in a mailbox
 pub struct MessageCounts {
-    unseen: u32,
-    total: u32,
+    unseen: usize,
+    total: usize,
 }
 
 impl MessageCounts {
-    pub fn new(unseen: u32, total: u32) -> Self {
+    pub fn new(unseen: usize, total: usize) -> Self {
         MessageCounts { unseen, total }
     }
 
     /// The total amount of message that have not been read in this mailbox
-    pub fn unseen(&self) -> &u32 {
+    pub fn unseen(&self) -> &usize {
         &self.unseen
     }
 
     /// The total amount of messages in this mailbox
-    pub fn total(&self) -> &u32 {
+    pub fn total(&self) -> &usize {
         &self.total
     }
 }
 
 impl From<ImapCounts> for MessageCounts {
     fn from(imap_counts: ImapCounts) -> Self {
-        Self::new(imap_counts.unseen.unwrap_or(0), imap_counts.exists)
+        Self::new(
+            imap_counts.unseen.unwrap_or(0) as usize,
+            imap_counts.exists as usize,
+        )
     }
 }
 
@@ -168,6 +171,7 @@ impl Default for MailBox {
 }
 
 /// A struct representing a list of all of the mailboxes in a user's account.
+#[derive(Debug)]
 pub struct MailBoxList {
     list: Vec<MailBox>,
 }

@@ -4,7 +4,6 @@ mod error;
 mod flags;
 mod mailbox;
 mod message;
-mod oauth2;
 
 use std::{collections::HashMap, result};
 
@@ -14,7 +13,6 @@ pub use error::{Error, ErrorKind};
 pub use flags::Flag;
 pub use mailbox::{MailBox, MailBoxList, MessageCounts};
 pub use message::{Address, Content, Message, Preview};
-pub use oauth2::OAuthCredentials;
 
 pub type Result<T> = result::Result<T, Error>;
 

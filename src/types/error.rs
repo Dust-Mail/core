@@ -9,6 +9,9 @@ use async_imap::error::Error as ImapError;
 #[cfg(feature = "autoconfig")]
 use autoconfig::types::Error as AutoconfigError;
 
+#[cfg(feature = "smtp")]
+use async_smtp::error::Error as SmtpError;
+
 use async_native_tls::Error as TlsError;
 
 use chrono::ParseError as ParseTimeError;
@@ -30,6 +33,8 @@ pub enum ErrorKind {
     #[cfg(feature = "pop")]
     /// An error from the Pop server.
     Pop(PopError),
+    #[cfg(feature = "smtp")]
+    Smtp(SmtpError),
     Tls(TlsError),
     /// Failed to parse a date/time from the server.
     ParseTime(ParseTimeError),
@@ -54,6 +59,7 @@ pub enum ErrorKind {
     ConfigNotFound,
     SpawnAsync,
     MailBoxNotFound,
+    InvalidSocketAddr,
     NoClientAvailable,
 }
 
@@ -102,6 +108,16 @@ impl From<ImapError> for Error {
         Self::new(
             ErrorKind::Imap(imap_error),
             format!("Error from imap server"),
+        )
+    }
+}
+
+#[cfg(feature = "smtp")]
+impl From<SmtpError> for Error {
+    fn from(smtp_error: SmtpError) -> Self {
+        Self::new(
+            ErrorKind::Smtp(smtp_error),
+            format!("Error from smtp server"),
         )
     }
 }

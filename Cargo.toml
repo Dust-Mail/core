@@ -1,6 +1,6 @@
 [package]
 name = "dust-mail"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -13,6 +13,8 @@ async-imap = { version = "0.8.0", default-features = false, features = [
 
 # Pop
 async-pop = { version = "0.1", optional = true }
+
+async-smtp = { version = "0.9.0", optional = true }
 
 # Autodetect service
 autoconfig = { version = "0.2", optional = true }
@@ -51,7 +53,7 @@ default = ["imap", "pop", "detect", "smtp"]
 detect = ["autoconfig"]
 autoconfig = ["dep:autoconfig"]
 
-smtp = []
+smtp = ["dep:async-smtp"]
 
 pop = ["dep:async-pop"]
 imap = ["dep:async-imap"]

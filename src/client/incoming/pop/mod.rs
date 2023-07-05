@@ -11,9 +11,12 @@ use tokio::{
 };
 
 use crate::{
-    client::incoming::IncomingSession,
+    client::protocol::{Credentials, IncomingProtocol, PopCredentials, ServerCredentials},
     parse::{parse_headers, parse_rfc822},
-    types::{Error, ErrorKind, Flag, MailBox, Message, MessageCounts, Preview, Result},
+    types::{
+        ConnectionSecurity, Error, ErrorKind, Flag, MailBox, MailBoxList, Message, MessageCounts,
+        Preview, Result,
+    },
 };
 
 use parse::parse_address;
@@ -26,9 +29,35 @@ pub struct PopClient<S: AsyncRead + AsyncWrite + Unpin> {
     session: async_pop::Client<S>,
 }
 
+impl<S: AsyncRead + AsyncWrite + Unpin> PopClient<S> {
+    pub async fn login<U: AsRef<str>, P: AsRef<str>>(
+        mut self,
+        username: U,
+        password: P,
+    ) -> Result<PopSession<S>> {
+        self.session.login(username, password).await?;
+
+        let session = PopSession::new(self.session);
+
+        Ok(session)
+    }
+
+    pub async fn oauth_login<U: AsRef<str>, T: AsRef<str>>(
+        mut self,
+        _: U,
+        token: T,
+    ) -> Result<PopSession<S>> {
+        self.session.auth(token).await?;
+
+        let session = PopSession::new(self.session);
+
+        Ok(session)
+    }
+}
+
 pub struct PopSession<S: AsyncRead + AsyncWrite + Unpin> {
     session: async_pop::Client<S>,
-    current_mailbox: Vec<MailBox>,
+    mailbox_list: MailBoxList,
     unique_id_map: HashMap<String, u32>,
 }
 
@@ -53,23 +82,54 @@ pub async fn connect_plain<S: AsRef<str>, P: Into<u16>>(
     Ok(PopClient { session })
 }
 
-impl<S: AsyncRead + AsyncWrite + Unpin> PopClient<S> {
-    pub async fn login<T: AsRef<str>>(self, username: T, password: T) -> Result<PopSession<S>> {
-        let mut session = self.session;
+async fn login<S: AsyncRead + AsyncWrite + Unpin>(
+    client: PopClient<S>,
+    credentials: &Credentials,
+) -> Result<PopSession<S>> {
+    match credentials {
+        Credentials::Password { username, password } => {
+            let session = client.login(username, password).await?;
 
-        session.login(username.as_ref(), password.as_ref()).await?;
+            Ok(session)
+        }
+        Credentials::OAuth { username, token } => {
+            let session = client.oauth_login(username, token).await?;
 
-        // session.capabilities()
+            Ok(session)
+        }
+    }
+}
 
-        Ok(PopSession {
-            session,
-            current_mailbox: Vec::new(),
-            unique_id_map: HashMap::new(),
-        })
+pub async fn create(credentials: &PopCredentials) -> Result<Box<dyn IncomingProtocol>> {
+    match credentials.server().security() {
+        ConnectionSecurity::Tls => {
+            let client =
+                connect(credentials.server().domain(), credentials.server().port()).await?;
+
+            let session = login(client, credentials.credentials()).await?;
+
+            Ok(Box::new(session))
+        }
+        _ => {
+            let client =
+                connect_plain(credentials.server().domain(), credentials.server().port()).await?;
+
+            let session = login(client, credentials.credentials()).await?;
+
+            Ok(Box::new(session))
+        }
     }
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> PopSession<S> {
+    pub fn new(session: async_pop::Client<S>) -> Self {
+        Self {
+            session,
+            mailbox_list: MailBoxList::new(Vec::new()),
+            unique_id_map: HashMap::new(),
+        }
+    }
+
     fn get_session_mut(&mut self) -> &mut async_pop::Client<S> {
         &mut self.session
     }
@@ -86,7 +146,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PopSession<S> {
 
         let box_name = MAILBOX_DEFAULT_NAME;
 
-        let counts = MessageCounts::new(0, *message_count);
+        let counts = MessageCounts::new(0, *message_count as usize);
 
         let mailbox = MailBox::new(Some(counts), None, Vec::new(), true, box_name, box_name);
 
@@ -125,54 +185,35 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PopSession<S> {
 }
 
 #[async_trait]
-impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingSession for PopSession<S> {
-    async fn logout(&mut self) -> Result<()> {
-        let session = self.get_session_mut();
+impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingProtocol for PopSession<S> {
+    async fn get_mailbox_list(&mut self) -> Result<&MailBoxList> {
+        self.mailbox_list = MailBoxList::new(vec![self.get_default_box().await?]);
 
-        session.quit().await?;
-
-        Ok(())
+        Ok(&self.mailbox_list)
     }
 
-    async fn box_list(&mut self) -> Result<&Vec<MailBox>> {
-        self.current_mailbox = vec![self.get_default_box().await?];
-
-        Ok(&self.current_mailbox)
-    }
-
-    async fn get(&mut self, _: &str) -> Result<&MailBox> {
-        self.current_mailbox = vec![self.get_default_box().await?];
-
-        let selected_box = match self.current_mailbox.first() {
-            Some(mailbox) => mailbox,
-            None => unreachable!(),
-        };
-
-        Ok(selected_box)
-    }
-
-    async fn delete(&mut self, _: &str) -> Result<()> {
+    async fn delete_mailbox(&mut self, _: &str) -> Result<()> {
         Err(Error::new(
             ErrorKind::Unsupported,
             "Pop does not support deleting mailboxes",
         ))
     }
 
-    async fn rename(&mut self, _: &str, _: &str) -> Result<()> {
+    async fn rename_mailbox(&mut self, _: &str, _: &str) -> Result<()> {
         Err(Error::new(
             ErrorKind::Unsupported,
             "Pop does not support renaming mailboxes",
         ))
     }
 
-    async fn create(&mut self, _: &str) -> Result<()> {
+    async fn create_mailbox(&mut self, _: &str) -> Result<()> {
         Err(Error::new(
             ErrorKind::Unsupported,
             "Pop does not support creating mailboxes",
         ))
     }
 
-    async fn messages(&mut self, _: &str, start: u32, end: u32) -> Result<Vec<Preview>> {
+    async fn get_messages(&mut self, _: &str, start: usize, end: usize) -> Result<Vec<Preview>> {
         let mailbox = self.get_default_box().await?;
 
         let total_messages = mailbox.counts().unwrap().total();
@@ -198,7 +239,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingSession for PopSession<S>
         let mut unique_id_map = HashMap::new();
 
         for msg_number in sequence_start..sequence_end {
-            let uidl_response = session.uidl(Some(msg_number)).await?;
+            let uidl_response = session.uidl(Some(msg_number as u32)).await?;
 
             let unique_id = match uidl_response {
                 UniqueIDResponse::UniqueIDList(list) => {
@@ -212,14 +253,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingSession for PopSession<S>
                 UniqueIDResponse::UniqueID(item) => item.unique_id().to_string(),
             };
 
-            let header_bytes = session.top(msg_number, 0).await?;
+            let header_bytes = session.top(msg_number as u32, 0).await?;
 
             let headers = parse_headers(&header_bytes)?;
 
             let (from, mut flags, sent, subject) = parse_preview_from_headers(&headers)?;
 
             // If we have marked a message as deleted, we will add the corresponding flag
-            if session.is_deleted(&msg_number) {
+            if session.is_deleted(&(msg_number as u32)) {
                 flags.push(Flag::Deleted)
             }
 
@@ -227,7 +268,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingSession for PopSession<S>
 
             // Add the unique id to the local map so we don't have to retrieve the entire list of unique id's later
             // just to get this message's msg_number.
-            unique_id_map.insert(unique_id, msg_number);
+            unique_id_map.insert(unique_id, msg_number as u32);
 
             previews.push(preview)
         }
@@ -281,9 +322,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingSession for PopSession<S>
 #[cfg(test)]
 mod test {
 
-    use super::PopSession;
-
-    use crate::client::incoming::IncomingSession;
+    use super::{IncomingProtocol, PopSession};
 
     use async_native_tls::TlsStream;
     use dotenv::dotenv;
@@ -310,7 +349,7 @@ mod test {
     async fn get_messages() {
         let mut session = create_test_session().await;
 
-        let previews = session.messages("Inbox", 0, 10).await.unwrap();
+        let previews = session.get_messages("Inbox", 0, 10).await.unwrap();
 
         for preview in previews.iter() {
             println!(
