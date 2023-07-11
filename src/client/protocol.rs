@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::types::{ConnectionSecurity, MailBoxList, Message, Preview, Result};
+use crate::types::{ConnectionSecurity, MailBox, MailBoxList, Message, Preview, Result};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct RemoteServer {
     server: String,
     port: u16,
@@ -36,7 +36,7 @@ impl RemoteServer {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub enum Credentials {
     Password { username: String, password: String },
     OAuth { username: String, token: String },
@@ -47,7 +47,7 @@ pub trait ServerCredentials {
 }
 
 #[cfg(feature = "smtp")]
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct SmtpCredentials {
     server: RemoteServer,
     credentials: Credentials,
@@ -75,7 +75,7 @@ impl ServerCredentials for SmtpCredentials {
 }
 
 #[cfg(feature = "imap")]
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct ImapCredentials {
     server: RemoteServer,
     credentials: Credentials,
@@ -103,7 +103,7 @@ impl ServerCredentials for ImapCredentials {
 }
 
 #[cfg(feature = "pop")]
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct PopCredentials {
     server: RemoteServer,
     credentials: Credentials,
@@ -134,6 +134,8 @@ impl ServerCredentials for PopCredentials {
 pub trait IncomingProtocol {
     async fn get_mailbox_list(&mut self) -> Result<&MailBoxList>;
 
+    async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<&MailBox>;
+
     async fn rename_mailbox(&mut self, old_name: &str, new_name: &str) -> Result<()>;
 
     async fn create_mailbox(&mut self, name: &str) -> Result<()>;
@@ -148,6 +150,8 @@ pub trait IncomingProtocol {
     ) -> Result<Vec<Preview>>;
 
     async fn get_message(&mut self, box_id: &str, message_id: &str) -> Result<Message>;
+
+    async fn logout(&mut self) -> Result<()>;
 }
 
 #[async_trait]
@@ -155,7 +159,7 @@ pub trait OutgoingProtocol {
     async fn send_message(&mut self, message: Message) -> Result<()>;
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub enum IncomingEmailProtocol {
     #[cfg(feature = "imap")]
     Imap(ImapCredentials),
@@ -164,7 +168,7 @@ pub enum IncomingEmailProtocol {
     Pop(PopCredentials),
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub enum OutgoingEmailProtocol {
     #[cfg(feature = "smtp")]
     Smtp(SmtpCredentials),

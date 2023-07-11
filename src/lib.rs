@@ -10,4 +10,7 @@ pub mod detect;
 
 pub mod types;
 
-pub use client::{create, Credentials, EmailClient, IncomingEmailProtocol, OutgoingEmailProtocol};
+pub use client::{
+    create, Credentials, EmailClient, IncomingEmailProtocol, OutgoingEmailProtocol,
+    ServerCredentials,
+};

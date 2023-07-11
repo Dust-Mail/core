@@ -100,7 +100,9 @@ async fn login<S: AsyncRead + AsyncWrite + Unpin>(
     }
 }
 
-pub async fn create(credentials: &PopCredentials) -> Result<Box<dyn IncomingProtocol>> {
+pub async fn create(
+    credentials: &PopCredentials,
+) -> Result<Box<dyn IncomingProtocol + Sync + Send>> {
     match credentials.server().security() {
         ConnectionSecurity::Tls => {
             let client =
@@ -137,7 +139,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PopSession<S> {
     /// Fetches the message count from the pop server and creates a new 'fake' mailbox.
     ///
     /// We do this because Pop does not support mailboxes.
-    async fn get_default_box(&mut self) -> Result<MailBox> {
+    async fn create_default_box(&mut self) -> Result<MailBox> {
         let session = self.get_session_mut();
 
         let stats = session.stat().await?;
@@ -187,9 +189,35 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PopSession<S> {
 #[async_trait]
 impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingProtocol for PopSession<S> {
     async fn get_mailbox_list(&mut self) -> Result<&MailBoxList> {
-        self.mailbox_list = MailBoxList::new(vec![self.get_default_box().await?]);
+        self.mailbox_list = MailBoxList::new(vec![self.create_default_box().await?]);
 
         Ok(&self.mailbox_list)
+    }
+
+    async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<&MailBox> {
+        if mailbox_id != MAILBOX_DEFAULT_NAME {
+            return Err(Error::new(
+                ErrorKind::MailBoxNotFound,
+                format!("Could not find a mailbox with id {}", mailbox_id),
+            ));
+        }
+
+        let mailbox_list = self.get_mailbox_list().await?;
+
+        if let Some(mailbox) = mailbox_list.get_box(mailbox_id) {
+            Ok(mailbox)
+        } else {
+            Err(Error::new(
+                ErrorKind::MailBoxNotFound,
+                format!("Could not find a mailbox with id {}", mailbox_id),
+            ))
+        }
+    }
+
+    async fn logout(&mut self) -> Result<()> {
+        self.session.quit().await?;
+
+        Ok(())
     }
 
     async fn delete_mailbox(&mut self, _: &str) -> Result<()> {
@@ -214,7 +242,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingProtocol for PopSession<S
     }
 
     async fn get_messages(&mut self, _: &str, start: usize, end: usize) -> Result<Vec<Preview>> {
-        let mailbox = self.get_default_box().await?;
+        let mailbox = self.create_default_box().await?;
 
         let total_messages = mailbox.counts().unwrap().total();
 

@@ -186,7 +186,9 @@ async fn create_session<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync>
 }
 
 /// Creates a new imap client from a given set of credentials
-pub async fn create(credentials: &ImapCredentials) -> Result<Box<dyn IncomingProtocol>> {
+pub async fn create(
+    credentials: &ImapCredentials,
+) -> Result<Box<dyn IncomingProtocol + Sync + Send>> {
     match credentials.server().security() {
         ConnectionSecurity::Tls => {
             let imap_client =
@@ -371,6 +373,25 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingProtocol f
         let mailbox_list = self.get_mailbox_list().await?;
 
         Ok(mailbox_list)
+    }
+
+    async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<&MailBox> {
+        let mailbox_list = self.get_mailbox_list().await?;
+
+        if let Some(mailbox) = mailbox_list.get_box(mailbox_id) {
+            Ok(mailbox)
+        } else {
+            Err(Error::new(
+                ErrorKind::MailBoxNotFound,
+                format!("Could not find a mailbox with id {}", mailbox_id),
+            ))
+        }
+    }
+
+    async fn logout(&mut self) -> Result<()> {
+        self.session.logout().await?;
+
+        Ok(())
     }
 
     async fn delete_mailbox(&mut self, box_id: &str) -> Result<()> {

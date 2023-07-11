@@ -96,7 +96,7 @@ impl OutgoingProtocol for SmtpClient {
     }
 }
 
-pub fn create(credentials: SmtpCredentials) -> Result<Box<dyn OutgoingProtocol>> {
+pub fn create(credentials: SmtpCredentials) -> Result<Box<dyn OutgoingProtocol + Sync + Send>> {
     let client = SmtpClient::new(credentials);
 
     Ok(Box::new(client))
