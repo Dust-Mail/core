@@ -188,6 +188,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PopSession<S> {
 
 #[async_trait]
 impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingProtocol for PopSession<S> {
+    async fn send_keep_alive(&mut self) -> Result<()> {
+        self.session.noop().await?;
+
+        Ok(())
+    }
+
+    fn should_keep_alive(&mut self) -> bool {
+        match self.session.is_expiring() {
+            Ok(is_expiring) => is_expiring,
+            Err(_) => false,
+        }
+    }
+
     async fn get_mailbox_list(&mut self) -> Result<&MailBoxList> {
         self.mailbox_list = MailBoxList::new(vec![self.create_default_box().await?]);
 

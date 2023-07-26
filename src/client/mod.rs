@@ -37,6 +37,14 @@ impl EmailClient {
         Self { incoming, outgoing }
     }
 
+    pub async fn send_keep_alive(&mut self) -> Result<()> {
+        self.incoming.send_keep_alive().await
+    }
+
+    pub fn should_keep_alive(&mut self) -> bool {
+        self.incoming.should_keep_alive()
+    }
+
     pub async fn get_mailbox_list(&mut self) -> Result<&MailBoxList> {
         self.incoming.get_mailbox_list().await
     }

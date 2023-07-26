@@ -132,6 +132,10 @@ impl ServerCredentials for PopCredentials {
 
 #[async_trait]
 pub trait IncomingProtocol {
+    async fn send_keep_alive(&mut self) -> Result<()>;
+
+    fn should_keep_alive(&mut self) -> bool;
+
     async fn get_mailbox_list(&mut self) -> Result<&MailBoxList>;
 
     async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<&MailBox>;

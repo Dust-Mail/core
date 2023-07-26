@@ -12,7 +12,7 @@ async-imap = { version = "0.8.0", default-features = false, features = [
 ], optional = true }
 
 # Pop
-async-pop = { version = "0.1", optional = true }
+async-pop = { version = "0.1.7", optional = true }
 
 async-smtp = { version = "0.9.0", optional = true }
 

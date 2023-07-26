@@ -98,9 +98,9 @@ dependencies = [
 
 [[package]]
 name = "async-pop"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c861cf12a3d462d5d747be247d83dd766f69ba5409a0c6df26db62d71699a2a"
+checksum = "96d715199f4da5c11506e39e9e98b1755825796861177c51744d8033ba78e114"
 dependencies = [
  "async-native-tls",
  "tokio",

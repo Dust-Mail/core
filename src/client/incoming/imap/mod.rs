@@ -1,4 +1,3 @@
-mod keep_alive;
 mod oauth;
 mod parse;
 use std::collections::HashMap;
@@ -10,7 +9,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
-use tokio::time::Duration;
+use tokio::time::{Duration, Instant};
 
 use crate::cache::{Cache, Refresher};
 use crate::client::protocol::{Credentials, ImapCredentials, IncomingProtocol, ServerCredentials};
@@ -20,7 +19,6 @@ use crate::types::{
     Result,
 };
 
-use self::keep_alive::ImapSessionWithKeepAlive;
 use self::oauth::OAuthCredentials;
 
 const QUERY_PREVIEW: &str = "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE UID)";
@@ -30,9 +28,10 @@ const QUERY_FULL_MESSAGE: &str = "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE RFC82
 
 const REFRESH_BOX_LIST: Duration = Duration::from_secs(10);
 const REFRESH_MESSAGE_COUNT: Duration = Duration::from_secs(60);
+const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(29 * 60);
 
 struct BoxListRefresher<'a, S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> {
-    session: &'a mut ImapSessionWithKeepAlive<S>,
+    session: &'a mut async_imap::Session<S>,
     selected_box: &'a mut Option<String>,
     message_count: &'a mut HashMap<String, Cache<MessageCounts>>,
 }
@@ -135,12 +134,13 @@ pub struct ImapClient<S: AsyncRead + AsyncWrite + Unpin + Debug + Send> {
 }
 
 pub struct ImapSession<S: AsyncWrite + AsyncRead + Unpin + Debug + Send + Sync> {
-    session: ImapSessionWithKeepAlive<S>,
+    session: async_imap::Session<S>,
     /// Counts per box
     message_count: HashMap<String, Cache<MessageCounts>>,
     box_list: Cache<MailBoxList>,
     /// The currently selected box' id.
     selected_box: Option<String>,
+    last_keep_alive: Option<Instant>,
 }
 
 pub async fn connect<S: AsRef<str>, P: Into<u16>>(
@@ -213,13 +213,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapClient<S> {
     fn new_imap_session(session: async_imap::Session<S>) -> ImapSession<S> {
         let box_list_cache = Cache::new(REFRESH_BOX_LIST);
 
-        let session_with_keep_alive = ImapSessionWithKeepAlive::new(session);
-
         ImapSession {
-            session: session_with_keep_alive,
+            session,
             message_count: HashMap::new(),
             box_list: box_list_cache,
             selected_box: None,
+            last_keep_alive: None,
         }
     }
 
@@ -369,6 +368,20 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
 
 #[async_trait]
 impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSession<S> {
+    async fn send_keep_alive(&mut self) -> Result<()> {
+        self.session.noop().await?;
+
+        Ok(())
+    }
+
+    fn should_keep_alive(&mut self) -> bool {
+        if let Some(last_keep_alive) = self.last_keep_alive {
+            Instant::now().duration_since(last_keep_alive) >= KEEP_ALIVE_INTERVAL
+        } else {
+            true
+        }
+    }
+
     async fn get_mailbox_list(&mut self) -> Result<&MailBoxList> {
         let mailbox_list = self.get_mailbox_list().await?;
 
