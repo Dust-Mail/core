@@ -43,6 +43,9 @@ futures = "0.3"
 ammonia = "3"
 regex = "1.7.3"
 
+# Logging
+log = "0.4.19"
+
 [dev-dependencies]
 env_logger = "0.10.0"
 dotenv = "0.15.0"

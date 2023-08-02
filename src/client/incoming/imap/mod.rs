@@ -7,13 +7,14 @@ use std::fmt::Debug;
 use async_native_tls::{TlsConnector, TlsStream};
 use async_trait::async_trait;
 use futures::StreamExt;
+use log::{debug, info};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::time::{Duration, Instant};
 
 use crate::cache::{Cache, Refresher};
 use crate::client::protocol::{Credentials, ImapCredentials, IncomingProtocol, ServerCredentials};
-use crate::debug;
+
 use crate::types::{
     ConnectionSecurity, Error, ErrorKind, MailBox, MailBoxList, Message, MessageCounts, Preview,
     Result,
@@ -41,7 +42,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MailBoxL
     for BoxListRefresher<'_, S>
 {
     async fn refresh(&mut self) -> Result<MailBoxList> {
-        debug!("Refreshing box list...");
+        debug!("Refreshing box list");
 
         // A planar graph of all of the mailboxes in the users account
         let mut mailboxes_planar: Vec<MailBox> = Vec::new();
@@ -175,6 +176,8 @@ async fn create_session<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync>
     imap_client: ImapClient<S>,
     credentials: &Credentials,
 ) -> Result<ImapSession<S>> {
+    info!("Creating new imap session");
+
     let imap_session = match credentials {
         Credentials::OAuth { username, token } => imap_client.oauth2_login(username, token).await?,
         Credentials::Password { username, password } => {
@@ -231,12 +234,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapClient<S> {
             .client
             .login(username, password)
             .await
-            .map_err(|(error, _)| {
-                Error::new(
-                    ErrorKind::Imap(error),
-                    "Failed to login to remote IMAP server using password",
-                )
-            })?;
+            .map_err(|(error, _)| Error::from(error))?;
 
         let imap_session = Self::new_imap_session(session);
 
@@ -254,12 +252,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapClient<S> {
             .client
             .authenticate("XOAUTH2", auth)
             .await
-            .map_err(|(error, _)| {
-                Error::new(
-                    ErrorKind::Imap(error),
-                    "Failed to login to remote IMAP server using oauth",
-                )
-            })?;
+            .map_err(|(error, _)| Error::from(error))?;
 
         let imap_session = Self::new_imap_session(session);
 
