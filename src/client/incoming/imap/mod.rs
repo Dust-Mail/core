@@ -362,6 +362,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
 #[async_trait]
 impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSession<S> {
     async fn send_keep_alive(&mut self) -> Result<()> {
+        self.last_keep_alive = Some(Instant::now());
+
         self.session.noop().await?;
 
         Ok(())

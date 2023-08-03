@@ -1,4 +1,9 @@
-use tokio::io::{AsyncRead, AsyncWrite};
+use std::sync::Arc;
+
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::RwLock,
+};
 
 trait Stream: AsyncRead + AsyncWrite {}
 
@@ -13,8 +18,9 @@ use self::outgoing::smtp;
 
 use self::protocol::{IncomingProtocol, OutgoingProtocol};
 
-pub use self::protocol::{
-    Credentials, IncomingEmailProtocol, OutgoingEmailProtocol, ServerCredentials,
+pub use self::{
+    keep_alive::KeepAlive,
+    protocol::{Credentials, IncomingEmailProtocol, OutgoingEmailProtocol, ServerCredentials},
 };
 
 use crate::types::{Error, ErrorKind, MailBox, MailBoxList, Message, Preview, Result};
@@ -23,6 +29,8 @@ mod incoming;
 mod outgoing;
 
 mod protocol;
+
+mod keep_alive;
 
 pub struct EmailClient {
     incoming: Box<dyn IncomingProtocol + Sync + Send>,
@@ -136,4 +144,38 @@ pub async fn create(
     };
 
     Ok(client)
+}
+
+/// An email client suitable for multithreading applications.
+pub struct ThreadableEmailClient {
+    client: Arc<RwLock<EmailClient>>,
+    keep_alive: KeepAlive,
+}
+
+impl AsRef<Arc<RwLock<EmailClient>>> for ThreadableEmailClient {
+    fn as_ref(&self) -> &Arc<RwLock<EmailClient>> {
+        &self.client
+    }
+}
+
+impl ThreadableEmailClient {
+    pub fn new(client: Arc<RwLock<EmailClient>>, mut keep_alive: KeepAlive) -> Self {
+        keep_alive.start();
+
+        Self { client, keep_alive }
+    }
+
+    pub fn keep_alive(&self) -> &KeepAlive {
+        &self.keep_alive
+    }
+}
+
+impl From<EmailClient> for ThreadableEmailClient {
+    fn from(client: EmailClient) -> Self {
+        let client = Arc::new(RwLock::new(client));
+
+        let keep_alive: KeepAlive = Arc::clone(&client).into();
+
+        Self::new(client, keep_alive)
+    }
 }

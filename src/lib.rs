@@ -11,6 +11,6 @@ pub mod detect;
 pub mod types;
 
 pub use client::{
-    create, Credentials, EmailClient, IncomingEmailProtocol, OutgoingEmailProtocol,
-    ServerCredentials,
+    create, Credentials, EmailClient, IncomingEmailProtocol, KeepAlive, OutgoingEmailProtocol,
+    ServerCredentials, ThreadableEmailClient,
 };
