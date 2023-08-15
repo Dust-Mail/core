@@ -1,6 +1,9 @@
 use async_smtp::{EmailAddress, Envelope, SendableEmail};
 
-use crate::types::{Error, ErrorKind, Message, Result};
+use crate::{
+    error::{Error, ErrorKind, Result},
+    types::Message,
+};
 
 pub fn create_sendable_message(message: Message) -> Result<SendableEmail> {
     let from = message

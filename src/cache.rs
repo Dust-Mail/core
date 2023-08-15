@@ -2,7 +2,7 @@ use async_trait::async_trait;
 
 use tokio::time::{Duration, Instant};
 
-use crate::types::Result;
+use crate::error::Result;
 
 #[async_trait]
 pub trait Refresher<T> {

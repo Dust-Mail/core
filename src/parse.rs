@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use mailparse::parse_mail;
 use serde::Serialize;
 
-use crate::types::{self, Content, Headers};
+use crate::{
+    error::{Error, ErrorKind, Result},
+    types::{Content, Headers},
+};
 
 const ALLOWED_HTML_TAGS: [&str; 71] = [
     "address",
@@ -109,7 +112,7 @@ fn sanitize_text(dirty: &str) -> String {
 }
 
 /// Parse an RFC 822 body to an appropriate and useful struct.
-pub fn parse_rfc822(body: &[u8]) -> types::Result<Content> {
+pub fn parse_rfc822(body: &[u8]) -> Result<Content> {
     let parsed = parse_mail(body)?;
 
     let mut text: Option<String> = None;
@@ -144,7 +147,7 @@ pub fn parse_rfc822(body: &[u8]) -> types::Result<Content> {
     Ok(Content::new(text, html))
 }
 
-pub fn parse_headers(response: &[u8]) -> types::Result<Headers> {
+pub fn parse_headers(response: &[u8]) -> Result<Headers> {
     let (parsed, _) = mailparse::parse_headers(response)?;
 
     let mut headers: Headers = HashMap::new();
@@ -158,10 +161,10 @@ pub fn parse_headers(response: &[u8]) -> types::Result<Headers> {
     Ok(headers)
 }
 
-pub fn to_json<T: ?Sized + Serialize>(value: &T) -> types::Result<String> {
+pub fn to_json<T: ?Sized + Serialize>(value: &T) -> Result<String> {
     serde_json::to_string(value).map_err(|e| {
-        types::Error::new(
-            types::ErrorKind::SerializeJSON,
+        Error::new(
+            ErrorKind::SerializeJSON,
             format!("Failed to serialize data to json: {}", e),
         )
     })

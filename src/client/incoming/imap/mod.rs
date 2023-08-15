@@ -15,9 +15,9 @@ use tokio::time::{Duration, Instant};
 use crate::cache::{Cache, Refresher};
 use crate::client::protocol::{Credentials, ImapCredentials, IncomingProtocol, ServerCredentials};
 
-use crate::types::{
-    ConnectionSecurity, Error, ErrorKind, MailBox, MailBoxList, Message, MessageCounts, Preview,
-    Result,
+use crate::{
+    error::{Error, ErrorKind, Result},
+    types::{ConnectionSecurity, MailBox, MailBoxList, Message, MessageCounts, Preview},
 };
 
 use self::oauth::OAuthCredentials;

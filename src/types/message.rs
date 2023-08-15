@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::parse;
+use crate::{error::Result, parse};
 
 use super::{Flag, Headers};
 
@@ -90,7 +90,7 @@ impl Preview {
         }
     }
 
-    pub fn to_json(&self) -> super::Result<String> {
+    pub fn to_json(&self) -> Result<String> {
         parse::to_json(self)
     }
 }
@@ -213,7 +213,7 @@ impl Message {
         &self.content
     }
 
-    pub fn to_json(&self) -> super::Result<String> {
+    pub fn to_json(&self) -> Result<String> {
         parse::to_json(self)
     }
 }

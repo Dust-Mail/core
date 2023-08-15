@@ -3,6 +3,8 @@ mod client;
 mod parse;
 mod tcp;
 
+pub mod error;
+
 mod validate;
 
 #[cfg(feature = "detect")]

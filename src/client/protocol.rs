@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::types::{ConnectionSecurity, MailBox, MailBoxList, Message, Preview, Result};
+use crate::{
+    error::Result,
+    types::{ConnectionSecurity, MailBox, MailBoxList, Message, Preview},
+};
 
 #[derive(Deserialize, Serialize)]
 pub struct RemoteServer {

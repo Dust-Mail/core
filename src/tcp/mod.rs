@@ -9,7 +9,7 @@ use tokio::{
 mod config;
 mod constants;
 
-use crate::types::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Result};
 
 pub struct TcpClient<S: AsyncWrite + AsyncRead + Unpin> {
     stream: BufStream<S>,

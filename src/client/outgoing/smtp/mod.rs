@@ -1,6 +1,7 @@
 use crate::{
     client::protocol::{OutgoingProtocol, SmtpCredentials},
-    types::{ConnectionSecurity, Message, Result},
+    error::Result,
+    types::{ConnectionSecurity, Message},
 };
 
 use async_native_tls::{TlsConnector, TlsStream};

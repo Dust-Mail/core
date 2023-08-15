@@ -1,6 +1,9 @@
 use chrono::DateTime;
 
-use crate::types::{Address, Flag, Headers, Result};
+use crate::{
+    error::Result,
+    types::{Address, Flag, Headers},
+};
 
 pub fn parse_address(address_list: &str) -> Vec<Address> {
     let split = address_list.split(",\r\t");

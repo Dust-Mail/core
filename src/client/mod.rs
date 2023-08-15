@@ -23,7 +23,10 @@ pub use self::{
     protocol::{Credentials, IncomingEmailProtocol, OutgoingEmailProtocol, ServerCredentials},
 };
 
-use crate::types::{Error, ErrorKind, MailBox, MailBoxList, Message, Preview, Result};
+use crate::{
+    error::{Error, ErrorKind, Result},
+    types::{MailBox, MailBoxList, Message, Preview},
+};
 
 mod incoming;
 mod outgoing;

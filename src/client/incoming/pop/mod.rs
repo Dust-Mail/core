@@ -12,11 +12,9 @@ use tokio::{
 
 use crate::{
     client::protocol::{Credentials, IncomingProtocol, PopCredentials, ServerCredentials},
+    error::{Error, ErrorKind, Result},
     parse::{parse_headers, parse_rfc822},
-    types::{
-        ConnectionSecurity, Error, ErrorKind, Flag, MailBox, MailBoxList, Message, MessageCounts,
-        Preview, Result,
-    },
+    types::{ConnectionSecurity, Flag, MailBox, MailBoxList, Message, MessageCounts, Preview},
 };
 
 use parse::parse_address;

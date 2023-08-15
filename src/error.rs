@@ -1,13 +1,10 @@
-use std::{error, fmt};
+use std::{error, fmt, result};
 
 #[cfg(feature = "pop")]
 use async_pop::types::Error as PopError;
 
 #[cfg(feature = "imap")]
 use async_imap::error::Error as ImapError;
-
-#[cfg(feature = "autoconfig")]
-use autoconfig::types::Error as AutoconfigError;
 
 #[cfg(feature = "smtp")]
 use async_smtp::error::Error as SmtpError;
@@ -39,9 +36,6 @@ pub enum ErrorKind {
     /// Failed to parse a date/time from the server.
     ParseTime(ParseTimeError),
     Timeout(Elapsed),
-    #[cfg(feature = "autoconfig")]
-    /// Something went wrong when fetching the email provider config for a given email address.
-    AutoConfig(AutoconfigError),
     /// Failed to parse a string given by the server.
     ParseString,
     /// Failed to parse a socket address which is used to connect to the remote mail server
@@ -59,7 +53,6 @@ pub enum ErrorKind {
     ConfigNotFound,
     SpawnAsync,
     MailBoxNotFound,
-    InvalidSocketAddr,
     NoClientAvailable,
 }
 
@@ -170,18 +163,21 @@ impl From<MailParseError> for Error {
     }
 }
 
-#[cfg(feature = "autoconfig")]
-impl From<AutoconfigError> for Error {
-    fn from(autoconfig_error: AutoconfigError) -> Self {
-        Error::new(
-            ErrorKind::AutoConfig(autoconfig_error),
-            "Failed to retrieve mail config from remote provider",
-        )
-    }
-}
-
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message)
     }
 }
+
+#[macro_export]
+macro_rules! failed {
+    ($kind:expr, $($arg:tt)*) => {{
+		use crate::error::Error;
+
+        let kind = $kind;
+        let message = format!($($arg)*);
+        return Err(Error::new( kind, message ));
+    }};
+}
+
+pub type Result<T> = result::Result<T, Error>;

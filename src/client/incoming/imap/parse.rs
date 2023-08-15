@@ -7,8 +7,9 @@ use async_imap::types::{
 };
 
 use crate::{
+    error::{Error, ErrorKind, Result},
     parse::{parse_headers, parse_rfc822},
-    types::{Address, Content, Error, ErrorKind, Flag, Headers, Message, Preview, Result},
+    types::{Address, Content, Flag, Headers, Message, Preview},
 };
 
 fn bytes_to_string<'a>(bytes: &Option<Cow<'a, [u8]>>) -> Option<String> {
