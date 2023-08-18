@@ -75,8 +75,7 @@ impl From<DnsDiscoverError> for Error {
     }
 }
 
-#[macro_export]
-macro_rules! failed {
+macro_rules! err {
     ($kind:expr, $($arg:tt)*) => {{
 		use crate::discover::error::Error;
 
@@ -85,5 +84,7 @@ macro_rules! failed {
         return Err(Error::new( kind, message ));
     }};
 }
+
+pub(crate) use err;
 
 pub type Result<T> = result::Result<T, Error>;

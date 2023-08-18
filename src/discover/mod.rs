@@ -1,11 +1,11 @@
-use crate::{failed, validate::validate_email};
+use crate::validate::validate_email;
 
 mod client;
 pub mod config;
 mod error;
 mod parse;
 
-use error::Result;
+use error::{err, Result};
 pub use error::{Error, ErrorKind};
 
 use config::{AuthenticationType, ConfigType, ServerConfig, ServerConfigType};
@@ -18,7 +18,7 @@ const INVALID_EMAIL_MESSAGE: &str = "Invalid email address";
 
 fn parse_domain<E: AsRef<str>>(email: E) -> Result<String> {
     if !validate_email(email.as_ref()) {
-        failed!(ErrorKind::InvalidEmailAddress, "{}", INVALID_EMAIL_MESSAGE);
+        err!(ErrorKind::InvalidEmailAddress, "{}", INVALID_EMAIL_MESSAGE);
     };
 
     let mut email_split = email.as_ref().split('@');
@@ -27,7 +27,7 @@ fn parse_domain<E: AsRef<str>>(email: E) -> Result<String> {
 
     let domain = match email_split.next() {
         Some(domain) => domain,
-        None => failed!(ErrorKind::InvalidEmailAddress, "{}", INVALID_EMAIL_MESSAGE),
+        None => err!(ErrorKind::InvalidEmailAddress, "{}", INVALID_EMAIL_MESSAGE),
     };
 
     Ok(domain.to_string())

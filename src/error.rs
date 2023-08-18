@@ -13,8 +13,30 @@ use async_native_tls::Error as TlsError;
 
 use chrono::ParseError as ParseTimeError;
 
+use email::results::ParsingError as AddressParseError;
+
 use mailparse::MailParseError;
-use tokio::{task::JoinError, time::error::Elapsed};
+use tokio::{io::Error as IoError, task::JoinError, time::error::Elapsed};
+
+macro_rules! impl_from_error {
+    ($error_type:ty, $error_kind:expr, $error_msg:expr) => {
+        impl From<$error_type> for Error {
+            fn from(err: $error_type) -> Self {
+                Error::new($error_kind(err), $error_msg)
+            }
+        }
+    };
+}
+
+macro_rules! err {
+    ($kind:expr, $($arg:tt)*) => {{
+		use crate::error::Error;
+
+        let kind = $kind;
+        let message = format!($($arg)*);
+        return Err(Error::new( kind, message ));
+    }};
+}
 
 #[derive(Debug)]
 pub enum ErrorKind {
@@ -51,7 +73,8 @@ pub enum ErrorKind {
     SerializeJSON,
     /// Could not detect a config from the given email address.
     ConfigNotFound,
-    SpawnAsync,
+    SpawnAsync(JoinError),
+    ParseEmailAddress(AddressParseError),
     MailBoxNotFound,
     NoClientAvailable,
 }
@@ -89,84 +112,53 @@ impl error::Error for Error {
 }
 
 #[cfg(feature = "pop")]
-impl From<PopError> for Error {
-    fn from(pop_error: PopError) -> Self {
-        Self::new(ErrorKind::Pop(pop_error), "Error from pop server")
-    }
-}
-
+impl_from_error!(PopError, |err| ErrorKind::Pop(err), "Error from pop server");
 #[cfg(feature = "imap")]
-impl From<ImapError> for Error {
-    fn from(imap_error: ImapError) -> Self {
-        Self::new(
-            ErrorKind::Imap(imap_error),
-            format!("Error from imap server"),
-        )
-    }
-}
-
+impl_from_error!(
+    ImapError,
+    |err| ErrorKind::Imap(err),
+    "Error from imap server"
+);
 #[cfg(feature = "smtp")]
-impl From<SmtpError> for Error {
-    fn from(smtp_error: SmtpError) -> Self {
-        Self::new(
-            ErrorKind::Smtp(smtp_error),
-            format!("Error from smtp server"),
-        )
-    }
-}
-
-impl From<JoinError> for Error {
-    fn from(join_error: JoinError) -> Self {
-        Self::new(
-            ErrorKind::SpawnAsync,
-            format!("Failed to spawn async task: {}", join_error),
-        )
-    }
-}
-
-impl From<TlsError> for Error {
-    fn from(native_tls_error: TlsError) -> Self {
-        Error::new(
-            ErrorKind::Tls(native_tls_error),
-            format!("Error creating a secure connection"),
-        )
-    }
-}
-
-impl From<tokio::io::Error> for Error {
-    fn from(io_error: tokio::io::Error) -> Self {
-        Error::new(ErrorKind::Io(io_error), "Error with io")
-    }
-}
-
-impl From<ParseTimeError> for Error {
-    fn from(chrono_error: ParseTimeError) -> Self {
-        Error::new(
-            ErrorKind::ParseTime(chrono_error),
-            "Failed to parse date time",
-        )
-    }
-}
-
-impl From<Elapsed> for Error {
-    fn from(timeout_error: Elapsed) -> Self {
-        Error::new(ErrorKind::Timeout(timeout_error), "Timeout error")
-    }
-}
-
-impl From<MailParseError> for Error {
-    fn from(mailparse_error: MailParseError) -> Self {
-        Error::new(
-            ErrorKind::ParseMessage(mailparse_error),
-            "Failed to parse mail message",
-        )
-    }
-}
+impl_from_error!(
+    SmtpError,
+    |err| ErrorKind::Smtp(err),
+    "Error from smtp server"
+);
+impl_from_error!(
+    JoinError,
+    |err| ErrorKind::SpawnAsync(err),
+    "Failed to spawn async task"
+);
+impl_from_error!(
+    TlsError,
+    |err| ErrorKind::Tls(err),
+    "Error creating a secure connection"
+);
+impl_from_error!(IoError, |err| ErrorKind::Io(err), "Io operation failed");
+impl_from_error!(
+    ParseTimeError,
+    |err| ErrorKind::ParseTime(err),
+    "Failed to parse date time"
+);
+impl_from_error!(Elapsed, |err| ErrorKind::Timeout(err), "Connection timeout");
+impl_from_error!(
+    MailParseError,
+    |err| ErrorKind::ParseMessage(err),
+    "Failed to parse mail message"
+);
+impl_from_error!(
+    AddressParseError,
+    |err| ErrorKind::ParseEmailAddress(err),
+    "Failed to parse email address"
+);
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message)
     }
 }
+
+pub(crate) use err;
 
 pub type Result<T> = result::Result<T, Error>;
