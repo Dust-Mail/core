@@ -3,6 +3,11 @@ name = "dust-mail"
 version = "0.2.0"
 edition = "2021"
 
+rust-version = "1.67"
+
+repository = "https://github.com/dust-mail/core"
+documentation = "https://docs.dust.email"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
