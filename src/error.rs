@@ -169,15 +169,4 @@ impl fmt::Display for Error {
     }
 }
 
-#[macro_export]
-macro_rules! failed {
-    ($kind:expr, $($arg:tt)*) => {{
-		use crate::error::Error;
-
-        let kind = $kind;
-        let message = format!($($arg)*);
-        return Err(Error::new( kind, message ));
-    }};
-}
-
 pub type Result<T> = result::Result<T, Error>;
