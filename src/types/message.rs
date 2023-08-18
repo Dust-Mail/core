@@ -71,11 +71,6 @@ impl Address {
 
         Ok(addresses)
     }
-
-    #[cfg(feature = "imap")]
-    pub fn from_imap(address: &imap::Address<'_>) -> Self {
-        Self::new(None, None)
-    }
 }
 
 #[derive(Serialize, Debug)]

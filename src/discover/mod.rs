@@ -1,5 +1,3 @@
-use crate::validate::validate_email;
-
 mod client;
 pub mod config;
 mod error;
@@ -11,6 +9,7 @@ pub use error::{Error, ErrorKind};
 use config::{AuthenticationType, ConfigType, ServerConfig, ServerConfigType};
 
 use client::Client;
+use validator::validate_email;
 
 use self::config::Config;
 

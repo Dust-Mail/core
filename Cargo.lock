@@ -395,10 +395,10 @@ dependencies = [
  "log",
  "mailparse",
  "ms-autodiscover",
- "regex",
  "serde",
  "serde_json",
  "tokio",
+ "validator",
 ]
 
 [[package]]

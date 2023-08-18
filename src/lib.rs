@@ -4,8 +4,6 @@ mod parse;
 
 pub mod error;
 
-mod validate;
-
 #[cfg(feature = "discover")]
 pub mod discover;
 
