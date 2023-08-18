@@ -1,5 +1,6 @@
 mod oauth;
-mod parse;
+mod query;
+
 use std::collections::HashMap;
 // use std::collections::HashMap;
 use std::fmt::Debug;
@@ -15,17 +16,14 @@ use tokio::time::{Duration, Instant};
 use crate::cache::{Cache, Refresher};
 use crate::client::protocol::{Credentials, ImapCredentials, IncomingProtocol, ServerCredentials};
 
+use crate::types::Flag;
 use crate::{
-    error::{Error, ErrorKind, Result},
+    error::{err, Error, ErrorKind, Result},
     types::{ConnectionSecurity, MailBox, MailBoxList, Message, MessageCounts, Preview},
 };
 
 use self::oauth::OAuthCredentials;
-
-const QUERY_PREVIEW: &str = "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE UID)";
-const QUERY_FULL_MESSAGE: &str = "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE RFC822 UID)";
-
-// const STATUS_ITEMS: &str = "(UNSEEN MESSAGES)";
+use self::query::QueryBuilder;
 
 const REFRESH_BOX_LIST: Duration = Duration::from_secs(10);
 const REFRESH_MESSAGE_COUNT: Duration = Duration::from_secs(60);
@@ -298,10 +296,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
         match requested_box {
             Some(mailbox) => {
                 if !mailbox.selectable() {
-                    return Err(Error::new(
+                    err!(
                         ErrorKind::MailServer,
-                        format!("The mailbox with id '{}' is not selectable", box_id),
-                    ));
+                        "The mailbox with id '{}' is not selectable",
+                        box_id,
+                    );
                 }
             }
             None => {}
@@ -490,18 +489,37 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingProtocol f
 
             let session = self.inner_mut();
 
-            let mut previews: Vec<Preview> =
-                Vec::with_capacity((end.saturating_sub(start)) as usize);
+            let mut previews = Vec::new();
+
+            let query = QueryBuilder::default()
+                .headers(vec!["From", "Date", "Subject"])
+                .build();
 
             {
-                let mut preview_stream = session.fetch(sequence, QUERY_PREVIEW).await?;
+                let mut preview_stream = session.fetch(sequence, &query).await?;
 
                 while let Some(fetch) = preview_stream.next().await {
                     let fetch = fetch?;
 
-                    let preview = parse::fetch_to_preview(&fetch)?;
+                    if let Some(headers) = fetch.header() {
+                        let message_id = match fetch.uid {
+                            Some(uid) => uid.to_string(),
+                            None => err!(
+                                ErrorKind::InvalidMessage,
+                                "The requested message is missing a unique identifier"
+                            ),
+                        };
 
-                    previews.push(preview);
+                        let flags = fetch
+                            .flags()
+                            .into_iter()
+                            .filter_map(|flag| Flag::from_imap(&flag))
+                            .collect();
+
+                        let preview = Preview::from_rfc822(headers, message_id, flags)?;
+
+                        previews.push(preview);
+                    }
                 }
             }
 
@@ -518,45 +536,60 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingProtocol f
 
         let session = self.inner_mut();
 
-        let mut fetch_stream = session.uid_fetch(msg_id, QUERY_FULL_MESSAGE).await?;
+        let query = QueryBuilder::default().body().build();
+
+        let mut fetch_stream = session.uid_fetch(msg_id, query).await?;
 
         let mut fetched = Vec::new();
 
         while let Some(fetch) = fetch_stream.next().await {
             let fetch = fetch?;
 
-            let uid = match &fetch.uid {
+            let server_uid = match &fetch.uid {
                 Some(uid) => uid,
                 // Only returns None when the UID parameter is not specified.
                 None => unreachable!(),
             };
 
-            let msg_id: u32 = msg_id.parse().map_err(|_| {
-                Error::new(
-                    ErrorKind::ParseString,
-                    "Failed to parse imap message uid to u32",
-                )
-            })?;
+            let uid: u32 = msg_id.parse()?;
 
             // Only add the fetches that match our uid
-            if uid == &msg_id {
+            if &uid == server_uid {
                 fetched.push(fetch);
             }
         }
 
-        if fetched.len() < 1 {
-            return Err(Error::new(
-                ErrorKind::MessageNotFound,
-                "Could not find a message with that id",
-            ));
-        };
-
         let fetch = match fetched.first() {
             Some(first) => first,
-            None => unreachable!(),
+            None => err!(
+                ErrorKind::MessageNotFound,
+                "Could not find a message with that id",
+            ),
         };
 
-        parse::fetch_to_message(fetch).await
+        let message_id = match fetch.uid {
+            Some(uid) => uid.to_string(),
+            None => err!(
+                ErrorKind::InvalidMessage,
+                "The requested message is missing a unique identifier"
+            ),
+        };
+
+        let flags = fetch
+            .flags()
+            .into_iter()
+            .filter_map(|flag| Flag::from_imap(&flag))
+            .collect();
+
+        match fetch.body() {
+            Some(body) => Message::from_rfc822(body, message_id, flags),
+            None => {
+                err!(
+                    ErrorKind::InvalidMessage,
+                    "The requested message is missing a body"
+                )
+            }
+        }
     }
 }
 
@@ -616,7 +649,7 @@ mod tests {
         let messages = session.get_messages(box_name, 0, 10).await.unwrap();
 
         for preview in messages.into_iter() {
-            println!("{}", preview.sent().unwrap());
+            println!("{:?}", preview);
         }
     }
 
@@ -634,12 +667,12 @@ mod tests {
     async fn get_message() {
         let mut session = create_test_session().await;
 
-        let msg_id = "1";
+        let msg_id = "1658";
         let box_id = "INBOX";
 
         let message = session.get_message(box_id, msg_id).await.unwrap();
 
-        println!("{}", message.id());
+        println!("{:?}", message);
     }
 
     #[tokio::test]

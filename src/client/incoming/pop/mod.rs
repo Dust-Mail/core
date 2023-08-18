@@ -1,5 +1,3 @@
-mod parse;
-
 use std::collections::HashMap;
 
 use async_native_tls::{TlsConnector, TlsStream};
@@ -13,13 +11,8 @@ use tokio::{
 use crate::{
     client::protocol::{Credentials, IncomingProtocol, PopCredentials, ServerCredentials},
     error::{Error, ErrorKind, Result},
-    parse::{parse_headers, parse_rfc822},
     types::{ConnectionSecurity, Flag, MailBox, MailBoxList, Message, MessageCounts, Preview},
 };
-
-use parse::parse_address;
-
-use self::parse::parse_preview_from_headers;
 
 const MAILBOX_DEFAULT_NAME: &str = "Inbox";
 
@@ -292,18 +285,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingProtocol for PopSession<S
                 UniqueIDResponse::UniqueID(item) => item.unique_id().to_string(),
             };
 
-            let header_bytes = session.top(msg_number as u32, 0).await?;
+            let body = session.top(msg_number as u32, 0).await?;
 
-            let headers = parse_headers(&header_bytes)?;
-
-            let (from, mut flags, sent, subject) = parse_preview_from_headers(&headers)?;
+            let mut flags = vec![Flag::Read];
 
             // If we have marked a message as deleted, we will add the corresponding flag
             if session.is_deleted(&(msg_number as u32)) {
                 flags.push(Flag::Deleted)
             }
 
-            let preview = Preview::new(from, flags, &unique_id, sent, subject);
+            let preview = Preview::from_rfc822(body, &unique_id, flags)?;
 
             // Add the unique id to the local map so we don't have to retrieve the entire list of unique id's later
             // just to get this message's msg_number.
@@ -317,44 +308,21 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> IncomingProtocol for PopSession<S
         Ok(previews)
     }
 
-    async fn get_message(&mut self, _box_id: &str, msg_id: &str) -> Result<Message> {
-        let msg_number = self.get_msg_number_from_msg_id(msg_id).await?;
+    async fn get_message(&mut self, _box_id: &str, message_id: &str) -> Result<Message> {
+        let msg_number = self.get_msg_number_from_msg_id(message_id).await?;
 
         let session = self.get_session_mut();
 
-        let message_bytes = session.retr(msg_number).await?;
+        let body = session.retr(msg_number).await?;
 
-        let content = parse_rfc822(&message_bytes)?;
-
-        let headers = parse_headers(&message_bytes)?;
-
-        let (from, mut flags, sent, subject) = parse_preview_from_headers(&headers)?;
+        let mut flags = vec![Flag::Read];
 
         // If we have marked a message as deleted, we will add the corresponding flag
-        if session.is_deleted(&msg_number) {
+        if session.is_deleted(&(msg_number as u32)) {
             flags.push(Flag::Deleted)
         }
 
-        let to = match headers.get("To") {
-            Some(to) => parse_address(to),
-            None => Vec::new(),
-        };
-
-        let cc = match headers.get("CC") {
-            Some(cc) => parse_address(cc),
-            None => Vec::new(),
-        };
-
-        let bcc = match headers.get("BCC") {
-            Some(bcc) => parse_address(bcc),
-            None => Vec::new(),
-        };
-
-        let message = Message::new(
-            from, to, cc, bcc, headers, flags, msg_id, sent, subject, content,
-        );
-
-        Ok(message)
+        Message::from_rfc822(body, message_id, flags)
     }
 }
 

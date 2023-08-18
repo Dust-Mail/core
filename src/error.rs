@@ -1,4 +1,4 @@
-use std::{error, fmt, result};
+use std::{error, fmt, num::ParseIntError, result};
 
 #[cfg(feature = "pop")]
 use async_pop::types::Error as PopError;
@@ -58,8 +58,7 @@ pub enum ErrorKind {
     /// Failed to parse a date/time from the server.
     ParseTime(ParseTimeError),
     Timeout(Elapsed),
-    /// Failed to parse a string given by the server.
-    ParseString,
+    ParseInt(ParseIntError),
     /// Failed to parse a socket address which is used to connect to the remote mail server
     ParseAddress,
     /// Failed to parse provided login config.
@@ -151,6 +150,11 @@ impl_from_error!(
     AddressParseError,
     |err| ErrorKind::ParseEmailAddress(err),
     "Failed to parse email address"
+);
+impl_from_error!(
+    ParseIntError,
+    |err| ErrorKind::ParseInt(err),
+    "Failed to parse integer value from string"
 );
 
 impl fmt::Display for Error {

@@ -23,6 +23,7 @@ dns-mail-discover = { version = "0.2", optional = true }
 
 # Generic mail utilities
 mailparse = "0.14"
+email = "0.0.21"
 
 # Serde
 serde = { version = "1.0", features = ["derive"] }

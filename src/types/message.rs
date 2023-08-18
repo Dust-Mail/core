@@ -1,13 +1,29 @@
+use chrono::DateTime;
+use mailparse::parse_mail;
 use serde::Serialize;
 
-use crate::{error::Result, parse};
+use crate::{
+    error::Result,
+    parse::{self, parse_headers},
+};
 
 use super::{Flag, Headers};
+
+use email::FromHeader;
+
+#[cfg(feature = "imap")]
+use async_imap::imap_proto as imap;
 
 #[derive(Debug, Serialize)]
 pub struct Address {
     name: Option<String>,
     address: Option<String>,
+}
+
+impl From<email::Mailbox> for Address {
+    fn from(mailbox: email::Mailbox) -> Self {
+        Address::new(mailbox.name, Some(mailbox.address))
+    }
 }
 
 impl Address {
@@ -34,9 +50,35 @@ impl Address {
             None
         }
     }
+
+    pub fn from_header<H: Into<String>>(header: H) -> Result<Vec<Self>> {
+        let address_list: Vec<email::Address> = Vec::from_header(header.into())?;
+
+        let mut addresses = Vec::new();
+
+        for address in address_list {
+            match address {
+                email::Address::Group(_name, list) => {
+                    for mailbox in list {
+                        addresses.push(mailbox.into());
+                    }
+                }
+                email::Address::Mailbox(mailbox) => {
+                    addresses.push(mailbox.into());
+                }
+            }
+        }
+
+        Ok(addresses)
+    }
+
+    #[cfg(feature = "imap")]
+    pub fn from_imap(address: &imap::Address<'_>) -> Self {
+        Self::new(None, None)
+    }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Preview {
     from: Vec<Address>,
     flags: Vec<Flag>,
@@ -93,6 +135,34 @@ impl Preview {
     pub fn to_json(&self) -> Result<String> {
         parse::to_json(self)
     }
+
+    pub fn from_rfc822<B: AsRef<[u8]>, I: AsRef<str>>(
+        bytes: B,
+        message_id: I,
+        flags: Vec<Flag>,
+    ) -> Result<Self> {
+        let headers = parse_headers(bytes)?;
+
+        let subject = headers.get("Subject").cloned();
+
+        let sent = match headers.get("Date") {
+            Some(date) => {
+                let datetime = DateTime::parse_from_rfc2822(date.trim())?;
+
+                Some(datetime.timestamp())
+            }
+            None => None,
+        };
+
+        let from = match headers.get("From") {
+            Some(from) => Address::from_header(from)?,
+            None => Vec::new(),
+        };
+
+        let preview = Preview::new(from, flags, message_id.as_ref(), sent, subject);
+
+        Ok(preview)
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -121,9 +191,44 @@ impl Content {
             None => None,
         }
     }
+
+    pub fn from_rfc822<B: AsRef<[u8]>>(bytes: B) -> Result<Self> {
+        let parsed = parse_mail(bytes.as_ref())?;
+
+        let mut text: Option<String> = None;
+        let mut html: Option<String> = None;
+
+        for part in parsed.parts() {
+            let headers = part.get_headers();
+
+            for header in headers {
+                let key = header.get_key_ref().trim().to_ascii_lowercase();
+
+                if key == "content-type" {
+                    let value = header.get_value().trim().to_ascii_lowercase();
+
+                    let body = Some(part.get_body()?);
+
+                    if value.starts_with("text/plain") {
+                        text = match body {
+                            Some(body_data) => Some(parse::sanitize_text(&body_data)),
+                            None => None,
+                        }
+                    } else if value.starts_with("text/html") {
+                        html = match body {
+                            Some(body_data) => Some(parse::sanitize_html(&body_data)),
+                            None => None,
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(Content::new(text, html))
+    }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Message {
     from: Vec<Address>,
     to: Vec<Address>,
@@ -211,6 +316,52 @@ impl Message {
     /// A struct containing info about the message content
     pub fn content(&self) -> &Content {
         &self.content
+    }
+
+    pub fn from_rfc822<B: AsRef<[u8]>, I: Into<String>>(
+        bytes: B,
+        message_id: I,
+        flags: Vec<Flag>,
+    ) -> Result<Self> {
+        let headers = parse_headers(&bytes)?;
+        let content = Content::from_rfc822(&bytes)?;
+
+        let subject = headers.get("Subject").cloned();
+
+        let sent = match headers.get("Date") {
+            Some(date) => {
+                let datetime = DateTime::parse_from_rfc2822(date.trim())?;
+
+                Some(datetime.timestamp())
+            }
+            None => None,
+        };
+
+        let from = match headers.get("From") {
+            Some(from) => Address::from_header(from)?,
+            None => Vec::new(),
+        };
+
+        let to = match headers.get("To") {
+            Some(to) => Address::from_header(to)?,
+            None => Vec::new(),
+        };
+
+        let bcc = match headers.get("BCC") {
+            Some(bcc) => Address::from_header(bcc)?,
+            None => Vec::new(),
+        };
+
+        let cc = match headers.get("CC") {
+            Some(cc) => Address::from_header(cc)?,
+            None => Vec::new(),
+        };
+
+        let message = Message::new(
+            from, to, cc, bcc, headers, flags, message_id, sent, subject, content,
+        );
+
+        Ok(message)
     }
 
     pub fn to_json(&self) -> Result<String> {
