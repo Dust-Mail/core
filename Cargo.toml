@@ -8,6 +8,9 @@ rust-version = "1.67"
 repository = "https://github.com/dust-mail/core"
 documentation = "https://docs.dust.email"
 
+license = "MIT"
+description = "A multi protocol email client"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
