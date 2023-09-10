@@ -1,2 +1,2 @@
-#[cfg(feature = "smtp")]
+#[cfg(all(feature = "smtp", feature = "runtime-tokio"))]
 pub mod smtp;

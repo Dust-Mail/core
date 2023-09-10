@@ -11,9 +11,6 @@ use super::{Flag, Headers};
 
 use email::FromHeader;
 
-#[cfg(feature = "imap")]
-use async_imap::imap_proto as imap;
-
 #[derive(Debug, Serialize)]
 pub struct Address {
     name: Option<String>,
@@ -127,8 +124,9 @@ impl Preview {
         }
     }
 
+    #[cfg(feature = "json")]
     pub fn to_json(&self) -> Result<String> {
-        parse::to_json(self)
+        parse::json::to_json(self)
     }
 
     pub fn from_rfc822<B: AsRef<[u8]>, I: AsRef<str>>(
@@ -359,7 +357,8 @@ impl Message {
         Ok(message)
     }
 
+    #[cfg(feature = "json")]
     pub fn to_json(&self) -> Result<String> {
-        parse::to_json(self)
+        parse::json::to_json(self)
     }
 }

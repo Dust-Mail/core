@@ -1,4 +1,6 @@
 use async_trait::async_trait;
+
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -6,7 +8,7 @@ use crate::{
     types::{ConnectionSecurity, MailBox, MailBoxList, Message, Preview},
 };
 
-#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RemoteServer {
     server: String,
     port: u16,
@@ -39,7 +41,7 @@ impl RemoteServer {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Credentials {
     Password { username: String, password: String },
     OAuth { username: String, token: String },
@@ -50,7 +52,7 @@ pub trait ServerCredentials {
 }
 
 #[cfg(feature = "smtp")]
-#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SmtpCredentials {
     server: RemoteServer,
     credentials: Credentials,
@@ -78,7 +80,7 @@ impl ServerCredentials for SmtpCredentials {
 }
 
 #[cfg(feature = "imap")]
-#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ImapCredentials {
     server: RemoteServer,
     credentials: Credentials,
@@ -106,7 +108,7 @@ impl ServerCredentials for ImapCredentials {
 }
 
 #[cfg(feature = "pop")]
-#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PopCredentials {
     server: RemoteServer,
     credentials: Credentials,
@@ -137,7 +139,7 @@ impl ServerCredentials for PopCredentials {
 pub trait IncomingProtocol {
     async fn send_keep_alive(&mut self) -> Result<()>;
 
-    fn should_keep_alive(&mut self) -> bool;
+    fn should_keep_alive(&self) -> bool;
 
     async fn get_mailbox_list(&mut self) -> Result<&MailBoxList>;
 
@@ -166,7 +168,7 @@ pub trait OutgoingProtocol {
     async fn send_message(&mut self, message: Message) -> Result<()>;
 }
 
-#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum IncomingEmailProtocol {
     #[cfg(feature = "imap")]
     Imap(ImapCredentials),
@@ -175,7 +177,7 @@ pub enum IncomingEmailProtocol {
     Pop(PopCredentials),
 }
 
-#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum OutgoingEmailProtocol {
     #[cfg(feature = "smtp")]
     Smtp(SmtpCredentials),

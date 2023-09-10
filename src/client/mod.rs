@@ -1,11 +1,6 @@
 use std::sync::Arc;
 
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::RwLock,
-};
-
-trait Stream: AsyncRead + AsyncWrite {}
+use crate::runtime::thread::RwLock;
 
 #[cfg(feature = "imap")]
 use self::incoming::imap;
@@ -13,7 +8,7 @@ use self::incoming::imap;
 #[cfg(feature = "pop")]
 use self::incoming::pop;
 
-#[cfg(feature = "smtp")]
+#[cfg(all(feature = "smtp", feature = "runtime-tokio"))]
 use self::outgoing::smtp;
 
 use self::protocol::{IncomingProtocol, OutgoingProtocol};
@@ -24,7 +19,7 @@ pub use self::{
 };
 
 use crate::{
-    error::{Error, ErrorKind, Result},
+    error::Result,
     types::{MailBox, MailBoxList, Message, Preview},
 };
 
@@ -52,7 +47,7 @@ impl EmailClient {
         self.incoming.send_keep_alive().await
     }
 
-    pub fn should_keep_alive(&mut self) -> bool {
+    pub fn should_keep_alive(&self) -> bool {
         self.incoming.should_keep_alive()
     }
 
@@ -122,22 +117,29 @@ pub async fn create(
 
         #[cfg(feature = "pop")]
         IncomingEmailProtocol::Pop(credentials) => pop::create(&credentials).await?,
+
+        #[cfg(not(any(feature = "imap", feature = "pop")))]
         _ => {
-            return Err(Error::new(
+            use crate::error::{err, ErrorKind};
+
+            err!(
                 ErrorKind::NoClientAvailable,
                 "There are no incoming mail clients supported",
-            ));
+            );
         }
     };
 
     let outgoing_protocol = match outgoing {
-        #[cfg(feature = "smtp")]
+        #[cfg(all(feature = "smtp", feature = "runtime-tokio"))]
         OutgoingEmailProtocol::Smtp(credentials) => smtp::create(credentials)?,
+        #[cfg(not(any(all(feature = "smtp", feature = "runtime-tokio"))))]
         _ => {
-            return Err(Error::new(
+            use crate::error::{err, ErrorKind};
+
+            err!(
                 ErrorKind::NoClientAvailable,
                 "There are no outgoing mail clients supported",
-            ));
+            );
         }
     };
 

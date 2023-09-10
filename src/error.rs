@@ -1,7 +1,7 @@
 use std::{error, fmt, num::ParseIntError, result};
 
 #[cfg(feature = "pop")]
-use async_pop::types::Error as PopError;
+use async_pop::error::Error as PopError;
 
 #[cfg(feature = "imap")]
 use async_imap::error::Error as ImapError;
@@ -16,7 +16,12 @@ use chrono::ParseError as ParseTimeError;
 use email::results::ParsingError as AddressParseError;
 
 use mailparse::MailParseError;
+
+#[cfg(feature = "runtime-tokio")]
 use tokio::{io::Error as IoError, task::JoinError, time::error::Elapsed};
+
+#[cfg(feature = "runtime-async-std")]
+use async_std::io::Error as IoError;
 
 macro_rules! impl_from_error {
     ($error_type:ty, $error_kind:expr, $error_msg:expr) => {
@@ -45,7 +50,7 @@ pub enum ErrorKind {
     UnexpectedBehavior,
     /// The requested feature/function is unsupported for this client type.
     Unsupported,
-    Io(tokio::io::Error),
+    Io(IoError),
     #[cfg(feature = "imap")]
     /// An error from the Imap server.
     Imap(ImapError),
@@ -57,7 +62,6 @@ pub enum ErrorKind {
     Tls(TlsError),
     /// Failed to parse a date/time from the server.
     ParseTime(ParseTimeError),
-    Timeout(Elapsed),
     ParseInt(ParseIntError),
     /// Failed to parse a socket address which is used to connect to the remote mail server
     ParseAddress,
@@ -72,7 +76,7 @@ pub enum ErrorKind {
     SerializeJSON,
     /// Could not detect a config from the given email address.
     ConfigNotFound,
-    SpawnAsync(JoinError),
+
     ParseEmailAddress(AddressParseError),
     MailBoxNotFound,
     NoClientAvailable,
@@ -125,11 +129,6 @@ impl_from_error!(
     "Error from smtp server"
 );
 impl_from_error!(
-    JoinError,
-    |err| ErrorKind::SpawnAsync(err),
-    "Failed to spawn async task"
-);
-impl_from_error!(
     TlsError,
     |err| ErrorKind::Tls(err),
     "Error creating a secure connection"
@@ -140,7 +139,6 @@ impl_from_error!(
     |err| ErrorKind::ParseTime(err),
     "Failed to parse date time"
 );
-impl_from_error!(Elapsed, |err| ErrorKind::Timeout(err), "Connection timeout");
 impl_from_error!(
     MailParseError,
     |err| ErrorKind::ParseMessage(err),

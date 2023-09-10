@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use log::{info, trace, warn};
-use tokio::{
-    spawn,
-    sync::RwLock,
-    task::JoinHandle,
-    time::{self, Duration},
+use crate::runtime::{
+    thread::{spawn, RwLock},
+    time::{sleep, Duration},
+    JoinHandle,
 };
+
+use log::{info, trace, warn};
 
 use crate::EmailClient;
 
@@ -48,7 +48,7 @@ impl KeepAlive {
 
         let handle = spawn(async move {
             loop {
-                time::sleep(Self::CHECK_TIME).await;
+                sleep(Self::CHECK_TIME).await;
 
                 let mut write_lock = client.write().await;
 
@@ -71,10 +71,11 @@ impl KeepAlive {
     }
 
     pub fn stop(&mut self) {
-        if let Some(handle) = &self.handle {
+        if let Some(_handle) = &self.handle {
             info!("Stopping keep alive requests");
 
-            handle.abort();
+            #[cfg(feature = "runtime-tokio")]
+            _handle.abort();
 
             self.handle = None;
         }

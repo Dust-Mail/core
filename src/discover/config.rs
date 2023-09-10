@@ -1,8 +1,13 @@
-use serde::Serialize;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
-use crate::{error::Result, parse::to_json, types::ConnectionSecurity};
+#[cfg(feature = "json")]
+use crate::error::Result;
 
-#[derive(Debug, Serialize, Clone, PartialEq, Eq, Hash)]
+use crate::types::ConnectionSecurity;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ServerConfigType {
     Imap,
     Pop,
@@ -19,8 +24,12 @@ impl ServerConfigType {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    feature = "serde",
+    derive(Serialize, Deserialize),
+    serde(rename_all = "camelCase")
+)]
 pub struct ServerConfig {
     r#type: ServerConfigType,
     port: u16,
@@ -67,7 +76,8 @@ impl ServerConfig {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AuthenticationType {
     ClearText,
     Encrypted,
@@ -165,7 +175,8 @@ impl Config {
         &self.display_name
     }
 
+    #[cfg(feature = "json")]
     pub fn to_json(&self) -> Result<String> {
-        to_json(self)
+        parse::json::to_json(self)
     }
 }

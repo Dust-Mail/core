@@ -5,13 +5,16 @@ use std::collections::HashMap;
 // use std::collections::HashMap;
 use std::fmt::Debug;
 
+use crate::runtime::{
+    io::{Read, Write},
+    net::TcpStream,
+    time::{Duration, Instant},
+};
+
 use async_native_tls::{TlsConnector, TlsStream};
 use async_trait::async_trait;
 use futures::StreamExt;
 use log::{debug, info};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
-use tokio::time::{Duration, Instant};
 
 use crate::cache::{Cache, Refresher};
 use crate::client::protocol::{Credentials, ImapCredentials, IncomingProtocol, ServerCredentials};
@@ -29,14 +32,14 @@ const REFRESH_BOX_LIST: Duration = Duration::from_secs(10);
 const REFRESH_MESSAGE_COUNT: Duration = Duration::from_secs(60);
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(29 * 60);
 
-struct BoxListRefresher<'a, S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> {
+struct BoxListRefresher<'a, S: Read + Write + Unpin + Debug + Send + Sync> {
     session: &'a mut async_imap::Session<S>,
     selected_box: &'a mut Option<String>,
     message_count: &'a mut HashMap<String, Cache<MessageCounts>>,
 }
 
 #[async_trait]
-impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MailBoxList>
+impl<S: Read + Write + Unpin + Debug + Send + Sync> Refresher<MailBoxList>
     for BoxListRefresher<'_, S>
 {
     async fn refresh(&mut self) -> Result<MailBoxList> {
@@ -104,14 +107,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MailBoxL
     }
 }
 
-struct MessageCountRefresher<'a, S: AsyncRead + AsyncWrite + Unpin + Debug + Send> {
+struct MessageCountRefresher<'a, S: Read + Write + Unpin + Debug + Send> {
     session: &'a mut async_imap::Session<S>,
     selected_box: &'a mut Option<String>,
     box_id: &'a str,
 }
 
 #[async_trait]
-impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MessageCounts>
+impl<S: Read + Write + Unpin + Debug + Send + Sync> Refresher<MessageCounts>
     for MessageCountRefresher<'_, S>
 {
     async fn refresh(&mut self) -> Result<MessageCounts> {
@@ -128,11 +131,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> Refresher<MessageC
     }
 }
 
-pub struct ImapClient<S: AsyncRead + AsyncWrite + Unpin + Debug + Send> {
+pub struct ImapClient<S: Read + Write + Unpin + Debug + Send> {
     client: async_imap::Client<S>,
 }
 
-pub struct ImapSession<S: AsyncWrite + AsyncRead + Unpin + Debug + Send + Sync> {
+pub struct ImapSession<S: Write + Read + Unpin + Debug + Send + Sync> {
     session: async_imap::Session<S>,
     /// Counts per box
     message_count: HashMap<String, Cache<MessageCounts>>,
@@ -170,7 +173,7 @@ pub async fn connect_plain<S: AsRef<str>, P: Into<u16>>(
     Ok(ImapClient { client })
 }
 
-async fn create_session<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync>(
+async fn create_session<S: Read + Write + Unpin + Debug + Send + Sync>(
     imap_client: ImapClient<S>,
     credentials: &Credentials,
 ) -> Result<ImapSession<S>> {
@@ -210,7 +213,7 @@ pub async fn create(
     }
 }
 
-impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapClient<S> {
+impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapClient<S> {
     fn new_imap_session(session: async_imap::Session<S>) -> ImapSession<S> {
         let box_list_cache = Cache::new(REFRESH_BOX_LIST);
 
@@ -258,7 +261,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapClient<S> {
     }
 }
 
-impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
+impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapSession<S> {
     pub fn inner_mut(&mut self) -> &mut async_imap::Session<S> {
         &mut self.session
     }
@@ -359,7 +362,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> ImapSession<S> {
 }
 
 #[async_trait]
-impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSession<S> {
+impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSession<S> {
     async fn send_keep_alive(&mut self) -> Result<()> {
         self.last_keep_alive = Some(Instant::now());
 
@@ -368,7 +371,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingProtocol f
         Ok(())
     }
 
-    fn should_keep_alive(&mut self) -> bool {
+    fn should_keep_alive(&self) -> bool {
         if let Some(last_keep_alive) = self.last_keep_alive {
             Instant::now().duration_since(last_keep_alive) >= KEEP_ALIVE_INTERVAL
         } else {
@@ -595,14 +598,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Debug + Send + Sync> IncomingProtocol f
 
 #[cfg(test)]
 mod tests {
-    use async_native_tls::TlsStream;
 
+    use super::*;
     use env_logger::Env;
-    use tokio::net::TcpStream;
-
-    use crate::client::protocol::IncomingProtocol;
-
-    use super::ImapSession;
 
     use dotenv::dotenv;
 
@@ -624,12 +622,14 @@ mod tests {
         session
     }
 
-    #[tokio::test]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
     async fn login() {
         create_test_session().await;
     }
 
-    #[tokio::test]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
     async fn get_mailbox() {
         let mut session = create_test_session().await;
 
@@ -640,7 +640,8 @@ mod tests {
         println!("{:?}", mailbox_list.get_box(box_name));
     }
 
-    #[tokio::test]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
     async fn get_messages() {
         let mut session = create_test_session().await;
 
@@ -653,7 +654,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
     async fn get_box_list() {
         env_logger::Builder::from_env(Env::default().default_filter_or("trace")).init();
         let mut session = create_test_session().await;
@@ -663,7 +665,8 @@ mod tests {
         println!("{:?}", box_list);
     }
 
-    #[tokio::test]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
     async fn get_message() {
         let mut session = create_test_session().await;
 
@@ -675,7 +678,8 @@ mod tests {
         println!("{:?}", message);
     }
 
-    #[tokio::test]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
     async fn rename_box() {
         let mut session = create_test_session().await;
 

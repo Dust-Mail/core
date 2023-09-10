@@ -1,9 +1,5 @@
 mod body;
 
-use serde::Serialize;
-
-use crate::error::{Error, ErrorKind, Result};
-
 pub use body::*;
 
 const ALLOWED_HTML_TAGS: [&str; 71] = [
@@ -109,11 +105,18 @@ pub fn sanitize_text(dirty: &str) -> String {
     ammonia::clean_text(dirty)
 }
 
-pub fn to_json<T: ?Sized + Serialize>(value: &T) -> Result<String> {
-    serde_json::to_string(value).map_err(|e| {
-        Error::new(
-            ErrorKind::SerializeJSON,
-            format!("Failed to serialize data to json: {}", e),
-        )
-    })
+#[cfg(feature = "json")]
+pub mod json {
+    use serde::Serialize;
+
+    use crate::error::{Error, ErrorKind, Result};
+
+    pub fn to_json<T: ?Sized + Serialize>(value: &T) -> Result<String> {
+        serde_json::to_string(value).map_err(|e| {
+            Error::new(
+                ErrorKind::SerializeJSON,
+                format!("Failed to serialize data to json: {}", e),
+            )
+        })
+    }
 }

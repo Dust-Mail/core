@@ -7,8 +7,11 @@ use crate::{
 use async_native_tls::{TlsConnector, TlsStream};
 use async_smtp::{self, SmtpTransport};
 use async_trait::async_trait;
-use tokio::io::{AsyncBufRead, AsyncWrite, BufStream};
-use tokio::net::TcpStream;
+
+use crate::runtime::{
+    io::{BufRead, BufStream, Write},
+    net::TcpStream,
+};
 
 use self::parse::create_sendable_message;
 
@@ -58,7 +61,7 @@ async fn connect_plain<S: AsRef<str>, P: Into<u16>>(
     Ok(transport)
 }
 
-async fn send<S: AsyncBufRead + AsyncWrite + Unpin>(
+async fn send<S: BufRead + Write + Unpin>(
     mut transport: SmtpTransport<S>,
     message: Message,
 ) -> Result<()> {

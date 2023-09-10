@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+#[cfg(feature = "serde")]
 use serde::Serialize;
 
 #[cfg(feature = "imap")]
@@ -9,7 +10,8 @@ use async_imap::types::{
 
 const DEFAULT_DELIMITER: &str = ".";
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct MailBox {
     counts: Option<MessageCounts>,
     delimiter: Option<String>,

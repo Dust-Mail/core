@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use tokio::time::{Duration, Instant};
+use std::time::{Duration, Instant};
 
 use crate::error::Result;
 

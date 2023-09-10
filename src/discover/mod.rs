@@ -76,12 +76,13 @@ pub async fn from_email<E: AsRef<str>, P: AsRef<str>>(
 }
 
 mod test {
-    #[tokio::test]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
     async fn from_email() {
         let email = "example@gmail.com";
 
         let config = super::from_email(email, None::<String>).await.unwrap();
 
-        println!("{}", config.to_json().unwrap());
+        println!("{:?}", config);
     }
 }
