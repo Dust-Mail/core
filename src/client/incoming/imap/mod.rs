@@ -5,10 +5,20 @@ use std::collections::HashMap;
 // use std::collections::HashMap;
 use std::fmt::Debug;
 
-use crate::runtime::{
-    io::{Read, Write},
-    net::TcpStream,
-    time::{Duration, Instant},
+use crate::{
+    runtime::{
+        io::{Read, Write},
+        net::TcpStream,
+        time::{Duration, Instant},
+    },
+    types::{
+        incoming::{
+            flags::Flag,
+            mailbox::{MailBox, MailBoxList, MessageCounts},
+            message::{Message, Preview},
+        },
+        MessageBuilder,
+    },
 };
 
 use async_native_tls::{TlsConnector, TlsStream};
@@ -19,10 +29,9 @@ use log::{debug, info};
 use crate::cache::{Cache, Refresher};
 use crate::client::protocol::{Credentials, ImapCredentials, IncomingProtocol, ServerCredentials};
 
-use crate::types::Flag;
 use crate::{
     error::{err, Error, ErrorKind, Result},
-    types::{ConnectionSecurity, MailBox, MailBoxList, Message, MessageCounts, Preview},
+    types::ConnectionSecurity,
 };
 
 use self::oauth::OAuthCredentials;
@@ -506,7 +515,7 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
 
                     if let Some(headers) = fetch.header() {
                         let message_id = match fetch.uid {
-                            Some(uid) => uid.to_string(),
+                            Some(uid) => uid,
                             None => err!(
                                 ErrorKind::InvalidMessage,
                                 "The requested message is missing a unique identifier"
@@ -516,10 +525,12 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
                         let flags = fetch
                             .flags()
                             .into_iter()
-                            .filter_map(|flag| Flag::from_imap(&flag))
-                            .collect();
+                            .filter_map(|flag| Flag::from_imap(&flag));
 
-                        let preview = Preview::from_rfc822(headers, message_id, flags)?;
+                        let builder: MessageBuilder = headers.try_into()?;
+
+                        let preview: Preview =
+                            builder.add_flags(flags).set_id(message_id).build()?;
 
                         previews.push(preview);
                     }
@@ -581,11 +592,16 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
         let flags = fetch
             .flags()
             .into_iter()
-            .filter_map(|flag| Flag::from_imap(&flag))
-            .collect();
+            .filter_map(|flag| Flag::from_imap(&flag));
 
         match fetch.body() {
-            Some(body) => Message::from_rfc822(body, message_id, flags),
+            Some(body) => {
+                let builder: MessageBuilder = body.try_into()?;
+
+                let message: Message = builder.add_flags(flags).set_id(message_id).build()?;
+
+                Ok(message)
+            }
             None => {
                 err!(
                     ErrorKind::InvalidMessage,

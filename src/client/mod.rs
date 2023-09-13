@@ -1,6 +1,12 @@
 use std::sync::Arc;
 
-use crate::runtime::thread::RwLock;
+use crate::{
+    runtime::thread::RwLock,
+    types::incoming::{
+        mailbox::{MailBox, MailBoxList},
+        message::{Message, Preview},
+    },
+};
 
 #[cfg(feature = "imap")]
 use self::incoming::imap;
@@ -18,10 +24,7 @@ pub use self::{
     protocol::{Credentials, IncomingEmailProtocol, OutgoingEmailProtocol, ServerCredentials},
 };
 
-use crate::{
-    error::Result,
-    types::{MailBox, MailBoxList, Message, Preview},
-};
+use crate::error::Result;
 
 mod incoming;
 mod outgoing;

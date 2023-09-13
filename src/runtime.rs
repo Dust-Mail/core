@@ -1,7 +1,7 @@
 pub mod io {
 
     #[cfg(feature = "runtime-async-std")]
-    pub(crate) use async_std::io::{BufRead, Read, Write};
+    pub(crate) use async_std::io::{Read, Write};
 
     #[cfg(feature = "runtime-tokio")]
     pub(crate) use tokio::io::{

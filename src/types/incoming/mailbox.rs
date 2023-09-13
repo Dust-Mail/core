@@ -296,9 +296,8 @@ impl MailBoxList {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::MailBox;
 
-    use super::MailBoxList;
+    use super::*;
 
     #[test]
     fn find_box() {

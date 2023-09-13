@@ -6,15 +6,25 @@ use async_native_tls::{TlsConnector, TlsStream};
 use async_pop::response::{types::DataType, uidl::UidlResponse};
 use async_trait::async_trait;
 
-use crate::runtime::{
-    io::{Read, Write},
-    net::TcpStream,
+use crate::{
+    runtime::{
+        io::{Read, Write},
+        net::TcpStream,
+    },
+    types::{
+        incoming::{
+            flags::Flag,
+            mailbox::{MailBox, MailBoxList, MessageCounts},
+            message::{Message, Preview},
+        },
+        MessageBuilder,
+    },
 };
 
 use crate::{
     client::protocol::{Credentials, IncomingProtocol, PopCredentials, ServerCredentials},
     error::{Error, ErrorKind, Result},
-    types::{ConnectionSecurity, Flag, MailBox, MailBoxList, Message, MessageCounts, Preview},
+    types::ConnectionSecurity,
 };
 
 use self::constants::{ACTIVITY_TIMEOUT, MAILBOX_DEFAULT_NAME};
@@ -297,7 +307,9 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
                 flags.push(Flag::Deleted)
             }
 
-            let preview = Preview::from_rfc822(body, &unique_id, flags)?;
+            let builder: MessageBuilder = body.as_ref().try_into()?;
+
+            let preview: Preview = builder.add_flags(flags).set_id(&unique_id).build()?;
 
             // Add the unique id to the local map so we don't have to retrieve the entire list of unique id's later
             // just to get this message's msg_number.
@@ -323,7 +335,11 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
             flags.push(Flag::Deleted)
         }
 
-        Message::from_rfc822(body, message_id, flags)
+        let builder: MessageBuilder = body.as_ref().try_into()?;
+
+        let message: Message = builder.add_flags(flags).set_id(message_id).build()?;
+
+        Ok(message)
     }
 }
 

@@ -1,6 +1,5 @@
 mod cache;
 mod client;
-mod parse;
 mod runtime;
 
 pub mod error;

@@ -5,7 +5,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::Result,
-    types::{ConnectionSecurity, MailBox, MailBoxList, Message, Preview},
+    types::{
+        incoming::{
+            mailbox::{MailBox, MailBoxList},
+            message::{Message, Preview},
+        },
+        ConnectionSecurity,
+    },
 };
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

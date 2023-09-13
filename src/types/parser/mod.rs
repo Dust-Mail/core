@@ -1,6 +1,5 @@
-mod body;
-
-pub use body::*;
+pub mod address;
+pub mod message;
 
 const ALLOWED_HTML_TAGS: [&str; 71] = [
     "address",
