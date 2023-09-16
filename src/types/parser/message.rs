@@ -4,10 +4,7 @@ use chrono::DateTime;
 
 use crate::{
     error::Result,
-    types::{
-        incoming::message::{Address, Content},
-        parser, Headers, MessageBuilder,
-    },
+    types::{parser, Address, Content, Headers, MessageBuilder},
 };
 
 pub fn from_headers<B: AsRef<[u8]>>(response: B) -> Result<Headers> {

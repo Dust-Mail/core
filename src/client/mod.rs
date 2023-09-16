@@ -1,10 +1,14 @@
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 
 use crate::{
+    error::{Error, ErrorKind},
     runtime::thread::RwLock,
-    types::incoming::{
-        mailbox::{MailBox, MailBoxList},
-        message::{Message, Preview},
+    types::{
+        incoming::{
+            mailbox::{MailBox, MailBoxList},
+            message::{Message, Preview},
+        },
+        outgoing::message::SendableMessage,
     },
 };
 
@@ -101,8 +105,18 @@ impl EmailClient {
             .await
     }
 
-    pub async fn send_message(&mut self, message: Message) -> Result<()> {
-        self.outgoing.send_message(message).await
+    pub async fn send_message<M: TryInto<SendableMessage, Error = impl Display>>(
+        &mut self,
+        message: M,
+    ) -> Result<()> {
+        let sendable = message.try_into().map_err(|err| {
+            Error::new(
+                ErrorKind::InvalidMessage,
+                format!("Failed to create sendable message: {}", err),
+            )
+        })?;
+
+        self.outgoing.send_message(sendable).await
     }
 
     pub async fn logout(&mut self) -> Result<()> {

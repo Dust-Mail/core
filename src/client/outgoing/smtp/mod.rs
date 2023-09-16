@@ -1,7 +1,7 @@
 use crate::{
     client::protocol::{OutgoingProtocol, SmtpCredentials},
     error::Result,
-    types::{ConnectionSecurity, Message},
+    types::{outgoing::message::SendableMessage, ConnectionSecurity},
 };
 
 use async_native_tls::{TlsConnector, TlsStream};
@@ -12,10 +12,6 @@ use crate::runtime::{
     io::{BufRead, BufStream, Write},
     net::TcpStream,
 };
-
-use self::parse::create_sendable_message;
-
-mod parse;
 
 pub struct SmtpClient {
     credentials: SmtpCredentials,
@@ -63,11 +59,9 @@ async fn connect_plain<S: AsRef<str>, P: Into<u16>>(
 
 async fn send<S: BufRead + Write + Unpin>(
     mut transport: SmtpTransport<S>,
-    message: Message,
+    message: SendableMessage,
 ) -> Result<()> {
-    let email = create_sendable_message(message)?;
-
-    transport.send(email).await?;
+    transport.send(message.try_into()?).await?;
 
     transport.quit().await?;
 
@@ -76,7 +70,7 @@ async fn send<S: BufRead + Write + Unpin>(
 
 #[async_trait]
 impl OutgoingProtocol for SmtpClient {
-    async fn send_message(&mut self, message: Message) -> Result<()> {
+    async fn send_message(&mut self, message: SendableMessage) -> Result<()> {
         match self.credentials.server().security() {
             ConnectionSecurity::Tls => {
                 let transport = connect(

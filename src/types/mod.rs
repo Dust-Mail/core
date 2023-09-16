@@ -4,22 +4,111 @@ mod connection;
 mod parser;
 
 pub mod incoming;
+pub mod outgoing;
 
 use std::{collections::HashMap, fmt::Display, result};
 
 pub use client::*;
 pub use connection::ConnectionSecurity;
 
-use self::{
-    incoming::{
-        flags::Flag,
-        message::{Address, Content},
-    },
-    parser::message::from_rfc822,
-};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+use self::incoming::flags::Flag;
 use crate::error::{err, Error, ErrorKind, Result};
 
 pub type Headers = HashMap<String, String>;
+
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Content {
+    text: Option<String>,
+    html: Option<String>,
+}
+
+impl<T: Into<String>> From<T> for Content {
+    fn from(text: T) -> Self {
+        Self::from_text(text)
+    }
+}
+
+impl Default for Content {
+    fn default() -> Self {
+        Self {
+            html: None,
+            text: None,
+        }
+    }
+}
+
+impl Content {
+    pub fn new(text: Option<String>, html: Option<String>) -> Self {
+        Self { text, html }
+    }
+
+    pub fn from_text<T: Into<String>>(text: T) -> Self {
+        Self::new(Some(text.into()), None)
+    }
+
+    /// The message in pure text form.
+    pub fn text(&self) -> Option<&str> {
+        match &self.text {
+            Some(text) => Some(text),
+            None => None,
+        }
+    }
+
+    /// The message as a html page.
+    pub fn html(&self) -> Option<&str> {
+        match &self.html {
+            Some(html) => Some(html),
+            None => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Address {
+    name: Option<String>,
+    address: Option<String>,
+}
+
+impl From<email::Mailbox> for Address {
+    fn from(mailbox: email::Mailbox) -> Self {
+        Address::new(mailbox.name, Some(mailbox.address))
+    }
+}
+
+impl Address {
+    pub fn new(name: Option<String>, address: Option<String>) -> Self {
+        Self { name, address }
+    }
+
+    pub fn name(&self) -> &Option<String> {
+        &self.name
+    }
+
+    pub fn address(&self) -> &Option<String> {
+        &self.address
+    }
+
+    pub fn full(&self) -> Option<String> {
+        if self.address.is_some() && self.name.is_some() {
+            Some(format!(
+                "{} <{}>",
+                self.name.as_ref().unwrap(),
+                self.address.as_ref().unwrap()
+            ))
+        } else {
+            None
+        }
+    }
+
+    pub fn from_header<H: Into<String>>(header: H) -> Result<Vec<Self>> {
+        parser::address::address_list(header)
+    }
+}
 
 pub struct MessageBuilder {
     from: Vec<Address>,
@@ -38,7 +127,7 @@ impl TryFrom<&[u8]> for MessageBuilder {
     type Error = Error;
 
     fn try_from(bytes: &[u8]) -> result::Result<Self, Self::Error> {
-        from_rfc822(bytes)
+        parser::message::from_rfc822(bytes)
     }
 }
 
@@ -131,8 +220,8 @@ impl MessageBuilder {
         self
     }
 
-    pub fn set_content(mut self, content: Content) -> Self {
-        self.content = Some(content);
+    pub fn set_content<C: Into<Content>>(mut self, content: C) -> Self {
+        self.content = Some(content.into());
 
         self
     }

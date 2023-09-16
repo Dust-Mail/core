@@ -10,6 +10,7 @@ use crate::{
             mailbox::{MailBox, MailBoxList},
             message::{Message, Preview},
         },
+        outgoing::message::SendableMessage,
         ConnectionSecurity,
     },
 };
@@ -171,7 +172,7 @@ pub trait IncomingProtocol {
 
 #[async_trait]
 pub trait OutgoingProtocol {
-    async fn send_message(&mut self, message: Message) -> Result<()>;
+    async fn send_message(&mut self, message: SendableMessage) -> Result<()>;
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

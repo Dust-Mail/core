@@ -104,7 +104,9 @@ impl Error {
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self.kind() {
+            #[cfg(feature = "pop")]
             ErrorKind::Pop(e) => e.source(),
+            #[cfg(feature = "imap")]
             ErrorKind::Imap(e) => e.source(),
             ErrorKind::Io(e) => e.source(),
             ErrorKind::Tls(e) => e.source(),

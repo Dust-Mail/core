@@ -1,12 +1,16 @@
 mod constants;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use async_native_tls::{TlsConnector, TlsStream};
-use async_pop::response::{types::DataType, uidl::UidlResponse};
+use async_pop::response::{
+    types::DataType,
+    uidl::{Uidl, UidlResponse, UniqueId},
+};
 use async_trait::async_trait;
 
 use crate::{
+    error::err,
     runtime::{
         io::{Read, Write},
         net::TcpStream,
@@ -59,10 +63,52 @@ impl<S: Read + Write + Unpin> PopClient<S> {
     }
 }
 
+struct UniqueIdMap {
+    map: HashMap<String, usize>,
+}
+
+impl UniqueIdMap {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.map.clear();
+    }
+
+    fn get_id(&self, index: usize) -> Option<&str> {
+        for (curr_id, curr_index) in &self.map {
+            if &index == curr_index {
+                return Some(curr_id);
+            }
+        }
+
+        None
+    }
+
+    fn get<I: AsRef<str>>(&self, id: I) -> Option<usize> {
+        self.map.get(id.as_ref()).map(|index| *index)
+    }
+
+    fn set<I: Display>(&mut self, id: I, index: usize) {
+        self.map.insert(id.to_string(), index);
+    }
+
+    fn extend<'a, L: IntoIterator<Item = &'a UniqueId>>(&mut self, list: L) -> Result<()> {
+        for unique_id in list {
+            self.set(unique_id.id(), unique_id.index().value()?)
+        }
+
+        Ok(())
+    }
+}
+
 pub struct PopSession<S: Read + Write + Unpin> {
     session: async_pop::Client<S>,
     mailbox_list: MailBoxList,
-    unique_id_map: HashMap<String, usize>,
+    unique_id_map: UniqueIdMap,
 }
 
 pub async fn connect<S: AsRef<str>, P: Into<u16>>(
@@ -137,55 +183,57 @@ impl<S: Read + Write + Unpin> PopSession<S> {
         Self {
             session,
             mailbox_list: MailBoxList::new(Vec::new()),
-            unique_id_map: HashMap::new(),
+            unique_id_map: UniqueIdMap::new(),
         }
     }
 
     /// Fetches the message count from the pop server and creates a new 'fake' mailbox.
     ///
     /// We do this because Pop does not support mailboxes.
-    async fn create_default_box(&mut self) -> Result<MailBox> {
+    async fn get_inbox(&mut self) -> Result<MailBox> {
         let stats = self.session.stat().await?;
 
         let message_count = stats.counter();
 
-        let box_name = MAILBOX_DEFAULT_NAME;
-
         let counts = MessageCounts::new(0, message_count.value()?);
 
-        let mailbox = MailBox::new(Some(counts), None, Vec::new(), true, box_name, box_name);
+        let mailbox = MailBox::new(
+            Some(counts),
+            None,
+            Vec::new(),
+            true,
+            MAILBOX_DEFAULT_NAME,
+            MAILBOX_DEFAULT_NAME,
+        );
 
         Ok(mailbox)
     }
 
-    async fn get_msg_number_from_msg_id<T: AsRef<str>>(&mut self, msg_id: T) -> Result<usize> {
-        match self.unique_id_map.get(msg_id.as_ref()) {
-            Some(msg_number) => return Ok(*msg_number),
-            None => {}
-        };
-
-        let unique_id_vec = match self.session.uidl(None).await? {
-            UidlResponse::Single(_) => {
-                // We gave the function a 'None' so it should never return this
-                unreachable!()
-            }
+    async fn update_map(&mut self) -> Result<()> {
+        let uidl = match self.session.uidl(None).await? {
             UidlResponse::Multiple(list) => list,
+            _ => unreachable!(),
         };
 
-        let mut unique_map = HashMap::new();
+        self.unique_id_map.extend(uidl.items())?;
 
-        for unique_id in unique_id_vec.items() {
-            unique_map.insert(unique_id.id().to_string(), unique_id.index().value()?);
-        }
+        Ok(())
+    }
 
-        self.unique_id_map = unique_map;
+    async fn get_index<T: AsRef<str>>(&mut self, unique_id: T) -> Result<usize> {
+        if let Some(index) = self.unique_id_map.get(&unique_id) {
+            return Ok(index);
+        };
 
-        match self.unique_id_map.get(msg_id.as_ref()) {
-            Some(msg_number) => Ok(msg_number.clone()),
-            None => Err(Error::new(
-                ErrorKind::UnexpectedBehavior,
-                format!("Could not find a message with id {}", msg_id.as_ref()),
-            )),
+        self.update_map().await?;
+
+        match self.unique_id_map.get(&unique_id) {
+            Some(msg_number) => Ok(msg_number),
+            None => err!(
+                ErrorKind::MessageNotFound,
+                "Could not find a message with id {}",
+                unique_id.as_ref()
+            ),
         }
     }
 }
@@ -206,28 +254,23 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
     }
 
     async fn get_mailbox_list(&mut self) -> Result<&MailBoxList> {
-        self.mailbox_list = MailBoxList::new(vec![self.create_default_box().await?]);
+        let inbox = self.get_inbox().await?;
+        self.mailbox_list = MailBoxList::new(vec![inbox]);
 
         Ok(&self.mailbox_list)
     }
 
     async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<&MailBox> {
-        if mailbox_id != MAILBOX_DEFAULT_NAME {
-            return Err(Error::new(
-                ErrorKind::MailBoxNotFound,
-                format!("Could not find a mailbox with id {}", mailbox_id),
-            ));
-        }
-
         let mailbox_list = self.get_mailbox_list().await?;
 
         if let Some(mailbox) = mailbox_list.get_box(mailbox_id) {
             Ok(mailbox)
         } else {
-            Err(Error::new(
+            err!(
                 ErrorKind::MailBoxNotFound,
-                format!("Could not find a mailbox with id {}", mailbox_id),
-            ))
+                "Could not find a mailbox with id {}",
+                mailbox_id
+            )
         }
     }
 
@@ -238,28 +281,28 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
     }
 
     async fn delete_mailbox(&mut self, _: &str) -> Result<()> {
-        Err(Error::new(
+        err!(
             ErrorKind::Unsupported,
             "Pop does not support deleting mailboxes",
-        ))
+        )
     }
 
     async fn rename_mailbox(&mut self, _: &str, _: &str) -> Result<()> {
-        Err(Error::new(
+        err!(
             ErrorKind::Unsupported,
             "Pop does not support renaming mailboxes",
-        ))
+        )
     }
 
     async fn create_mailbox(&mut self, _: &str) -> Result<()> {
-        Err(Error::new(
+        err!(
             ErrorKind::Unsupported,
             "Pop does not support creating mailboxes",
-        ))
+        )
     }
 
     async fn get_messages(&mut self, _: &str, start: usize, end: usize) -> Result<Vec<Preview>> {
-        let mailbox = self.create_default_box().await?;
+        let mailbox = self.get_inbox().await?;
 
         let total_messages = mailbox.counts().unwrap().total();
 
@@ -318,13 +361,13 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
             previews.push(preview)
         }
 
-        self.unique_id_map.extend(unique_id_map);
+        // self.unique_id_map.extend(unique_id_map);
 
         Ok(previews)
     }
 
     async fn get_message(&mut self, _box_id: &str, message_id: &str) -> Result<Message> {
-        let msg_number = self.get_msg_number_from_msg_id(message_id).await?;
+        let msg_number = self.get_index(message_id).await?;
 
         let body = self.session.retr(msg_number).await?;
 

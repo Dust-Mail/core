@@ -1,60 +1,17 @@
 use std::{collections::HashMap, result};
 
-use serde::Serialize;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    error::{err, Error, ErrorKind, Result},
-    types::{
-        parser::{self},
-        Headers, MessageBuilder,
-    },
+    error::{err, Error, ErrorKind},
+    types::{Address, Content, Headers, MessageBuilder},
 };
 
 use super::flags::Flag;
 
-#[derive(Debug, Serialize)]
-pub struct Address {
-    name: Option<String>,
-    address: Option<String>,
-}
-
-impl From<email::Mailbox> for Address {
-    fn from(mailbox: email::Mailbox) -> Self {
-        Address::new(mailbox.name, Some(mailbox.address))
-    }
-}
-
-impl Address {
-    pub fn new(name: Option<String>, address: Option<String>) -> Self {
-        Self { name, address }
-    }
-
-    pub fn name(&self) -> &Option<String> {
-        &self.name
-    }
-
-    pub fn address(&self) -> &Option<String> {
-        &self.address
-    }
-
-    pub fn full(&self) -> Option<String> {
-        if self.address.is_some() && self.name.is_some() {
-            Some(format!(
-                "{} <{}>",
-                self.name.as_ref().unwrap(),
-                self.address.as_ref().unwrap()
-            ))
-        } else {
-            None
-        }
-    }
-
-    pub fn from_header<H: Into<String>>(header: H) -> Result<Vec<Self>> {
-        parser::address::address_list(header)
-    }
-}
-
-#[derive(Serialize, Debug)]
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Preview {
     from: Vec<Address>,
     flags: Vec<Flag>,
@@ -119,44 +76,8 @@ impl TryFrom<MessageBuilder> for Preview {
     }
 }
 
-#[derive(Serialize, Debug)]
-pub struct Content {
-    text: Option<String>,
-    html: Option<String>,
-}
-
-impl Default for Content {
-    fn default() -> Self {
-        Self {
-            html: None,
-            text: None,
-        }
-    }
-}
-
-impl Content {
-    pub fn new(text: Option<String>, html: Option<String>) -> Self {
-        Self { text, html }
-    }
-
-    /// The message in pure text form.
-    pub fn text(&self) -> Option<&str> {
-        match &self.text {
-            Some(text) => Some(text),
-            None => None,
-        }
-    }
-
-    /// The message as a html page.
-    pub fn html(&self) -> Option<&str> {
-        match &self.html {
-            Some(html) => Some(html),
-            None => None,
-        }
-    }
-}
-
-#[derive(Serialize, Debug)]
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Message {
     from: Vec<Address>,
     to: Vec<Address>,

@@ -24,7 +24,7 @@ pub mod thread {
     pub(crate) use async_std::{sync::RwLock, task::spawn};
 
     #[cfg(feature = "runtime-tokio")]
-    pub(crate) use tokio::{sync::RwLock, thread::spawn};
+    pub(crate) use tokio::{sync::RwLock, task::spawn};
 }
 
 pub mod net {

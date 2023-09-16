@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 #[cfg(feature = "serde")]
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "imap")]
 use async_imap::types::{
@@ -11,7 +11,7 @@ use async_imap::types::{
 const DEFAULT_DELIMITER: &str = ".";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MailBox {
     counts: Option<MessageCounts>,
     delimiter: Option<String>,
@@ -21,7 +21,8 @@ pub struct MailBox {
     name: String,
 }
 
-#[derive(Debug, Default, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 /// A struct that holds the count for the total amount messages and the total amount of unseen messages in a mailbox
 pub struct MessageCounts {
     unseen: usize,
@@ -44,6 +45,7 @@ impl MessageCounts {
     }
 }
 
+#[cfg(feature = "imap")]
 impl From<ImapCounts> for MessageCounts {
     fn from(imap_counts: ImapCounts) -> Self {
         Self::new(
