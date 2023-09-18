@@ -50,18 +50,17 @@ impl KeepAlive {
             loop {
                 sleep(Self::CHECK_TIME).await;
 
-                let mut write_lock = client.write().await;
+                let read_lock = client.read().await;
 
                 trace!("Checking if keep alive request is needed");
 
-                if write_lock.should_keep_alive() {
+                if read_lock.should_keep_alive() {
+                    let mut write_lock = client.write().await;
+
                     info!("Sending keep alive request to mail server");
 
-                    match write_lock.send_keep_alive().await {
-                        Ok(_) => {}
-                        Err(err) => {
-                            warn!("Failed to send keep alive request to mail server: {}", err)
-                        }
+                    if let Err(err) = write_lock.send_keep_alive().await {
+                        warn!("Failed to send keep alive request to mail server: {}", err)
                     }
                 }
             }
