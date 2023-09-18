@@ -18,7 +18,7 @@ use email::results::ParsingError as AddressParseError;
 use mailparse::MailParseError;
 
 #[cfg(feature = "runtime-tokio")]
-use tokio::{io::Error as IoError, task::JoinError, time::error::Elapsed};
+use tokio::io::Error as IoError;
 
 #[cfg(feature = "runtime-async-std")]
 use async_std::io::Error as IoError;
@@ -76,7 +76,6 @@ pub enum ErrorKind {
     SerializeJSON,
     /// Could not detect a config from the given email address.
     ConfigNotFound,
-
     ParseEmailAddress(AddressParseError),
     MailBoxNotFound,
     NoClientAvailable,

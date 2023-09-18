@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ use async_imap::types::{
 
 const DEFAULT_DELIMITER: &str = ".";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MailBox {
     counts: Option<MessageCounts>,
@@ -21,37 +21,40 @@ pub struct MailBox {
     name: String,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-/// A struct that holds the count for the total amount messages and the total amount of unseen messages in a mailbox
-pub struct MessageCounts {
-    unseen: usize,
-    total: usize,
-}
-
-impl MessageCounts {
-    pub fn new(unseen: usize, total: usize) -> Self {
-        MessageCounts { unseen, total }
-    }
-
-    /// The total amount of message that have not been read in this mailbox
-    pub fn unseen(&self) -> &usize {
-        &self.unseen
-    }
-
-    /// The total amount of messages in this mailbox
-    pub fn total(&self) -> &usize {
-        &self.total
+impl PartialEq for MailBox {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
     }
 }
 
-#[cfg(feature = "imap")]
-impl From<ImapCounts> for MessageCounts {
-    fn from(imap_counts: ImapCounts) -> Self {
-        Self::new(
-            imap_counts.unseen.unwrap_or(0) as usize,
-            imap_counts.exists as usize,
-        )
+impl Display for MailBox {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let indents = match self.id_delimited() {
+            Some(delimited) => delimited.len().saturating_sub(1),
+            None => 0,
+        };
+
+        for i in 0..indents {
+            if i == indents - 1 {
+                write!(f, "|--")?;
+            } else {
+                write!(f, "   ")?;
+            };
+        }
+
+        write!(f, "{}", self.name())?;
+
+        if let Some(counts) = self.counts() {
+            write!(f, ": {}", counts)?;
+        }
+
+        for child in &self.children {
+            write!(f, "\r\n")?;
+
+            child.fmt(f)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -117,6 +120,16 @@ impl MailBox {
         &self.id
     }
 
+    pub fn id_delimited(&self) -> Option<Vec<&str>> {
+        if let Some(delimiter) = self.delimiter.as_ref() {
+            let split = self.id.split(delimiter);
+
+            return Some(split.collect());
+        };
+
+        None
+    }
+
     /// The mailbox name.
     pub fn name(&self) -> &str {
         &self.name
@@ -174,10 +187,79 @@ impl Default for MailBox {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+/// A struct that holds the count for the total amount messages and the total amount of unseen messages in a mailbox
+pub struct MessageCounts {
+    unseen: usize,
+    total: usize,
+}
+
+impl Display for MessageCounts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Total messages: {} | Unseen messages: {}",
+            self.total, self.unseen,
+        )
+    }
+}
+
+impl MessageCounts {
+    pub fn new(unseen: usize, total: usize) -> Self {
+        MessageCounts { unseen, total }
+    }
+
+    /// The total amount of message that have not been read in this mailbox
+    pub fn unseen(&self) -> &usize {
+        &self.unseen
+    }
+
+    /// The total amount of messages in this mailbox
+    pub fn total(&self) -> &usize {
+        &self.total
+    }
+}
+
+#[cfg(feature = "imap")]
+impl From<ImapCounts> for MessageCounts {
+    fn from(imap_counts: ImapCounts) -> Self {
+        Self::new(
+            imap_counts.unseen.unwrap_or(0) as usize,
+            imap_counts.exists as usize,
+        )
+    }
+}
+
 /// A struct representing a list of all of the mailboxes in a user's account.
 #[derive(Debug)]
 pub struct MailBoxList {
     list: Vec<MailBox>,
+}
+
+impl Default for MailBoxList {
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
+impl<L: IntoIterator<Item = MailBox>> From<L> for MailBoxList {
+    fn from(iter: L) -> Self {
+        Self::new(iter.into_iter().collect())
+    }
+}
+
+impl Display for MailBoxList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Mailbox tree:")?;
+
+        for node in &self.list {
+            write!(f, "\r\n")?;
+            node.fmt(f)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl MailBoxList {
@@ -296,6 +378,78 @@ impl MailBoxList {
     }
 }
 
+#[derive(Debug)]
+/// A struct useful for building a folder tree structure out of a flat mailbox array.
+pub struct MailBoxNode {
+    counts: Option<MessageCounts>,
+    delimiter: Option<String>,
+    children: HashMap<String, MailBoxNode>,
+    selectable: bool,
+    id: String,
+    name: String,
+}
+
+impl MailBoxNode {
+    pub fn children_mut(&mut self) -> &mut HashMap<String, MailBoxNode> {
+        &mut self.children
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl From<MailBox> for MailBoxNode {
+    /// Go from a planar mailbox (expects no children) to a mailbox tree
+    fn from(mailbox: MailBox) -> Self {
+        let mut children = HashMap::new();
+
+        for child in mailbox.children {
+            match child.id_delimited() {
+                Some(delimited) => {
+                    if let Some(id) = delimited.last() {
+                        children.insert(id.to_string(), MailBoxNode::from(child));
+                    }
+                }
+                None => {
+                    let id = child.id.clone();
+                    let node = MailBoxNode::from(child);
+
+                    children.insert(id, node);
+                }
+            }
+        }
+
+        Self {
+            children,
+            counts: mailbox.counts,
+            delimiter: mailbox.delimiter,
+            id: mailbox.id,
+            name: mailbox.name,
+            selectable: mailbox.selectable,
+        }
+    }
+}
+
+impl Into<MailBox> for MailBoxNode {
+    fn into(self) -> MailBox {
+        let children: Vec<MailBox> = self
+            .children
+            .into_iter()
+            .map(|(_, value)| value.into())
+            .collect();
+
+        MailBox::new(
+            self.counts,
+            self.delimiter,
+            children,
+            self.selectable,
+            self.id,
+            self.name,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -341,76 +495,57 @@ mod tests {
 
         assert_eq!(MailBoxList::find_box_in_list(&mock_boxes, "box3"), None);
     }
-}
 
-#[derive(Debug)]
-/// A struct useful for building a folder tree structure out of a flat mailbox array.
-pub struct MailBoxNode {
-    counts: Option<MessageCounts>,
-    delimiter: Option<String>,
-    children: HashMap<String, MailBoxNode>,
-    selectable: bool,
-    id: String,
-    name: String,
-}
+    #[test]
+    fn mailbox_display() {
+        let delimiter = Some(String::from("."));
 
-impl MailBoxNode {
-    pub fn children_mut(&mut self) -> &mut HashMap<String, MailBoxNode> {
-        &mut self.children
-    }
+        let box1 = MailBox::new(None, delimiter.clone(), vec![], true, "box1", "box1");
 
-    pub fn id(&self) -> &str {
-        &self.id
-    }
+        println!("{}", box1);
 
-    // pub fn new<S: Into<String>, T: Into<String>>(
-    //     counts: Option<Counts>,
-    //     delimiter: Option<String>,
-    //     children: HashMap<String, MailBoxNode>,
-    //     selectable: bool,
-    //     id: S,
-    //     name: T,
-    // ) -> Self {
-    //     Self {
-    //         counts,
-    //         delimiter,
-    //         children,
-    //         selectable,
-    //         id: id.into(),
-    //         name: name.into(),
-    //     }
-    // }
-}
+        let box5 = MailBox::new(
+            Some(MessageCounts::new(30, 50)),
+            delimiter.clone(),
+            vec![],
+            true,
+            "box2.box1.box1",
+            "box5",
+        );
 
-impl From<MailBox> for MailBoxNode {
-    /// Go from a planar mailbox (so no children) to a mailbox tree
-    fn from(mailbox: MailBox) -> Self {
-        Self {
-            children: HashMap::new(),
-            counts: mailbox.counts,
-            delimiter: mailbox.delimiter,
-            id: mailbox.id,
-            name: mailbox.name,
-            selectable: mailbox.selectable,
-        }
-    }
-}
+        let box6 = MailBox::new(
+            Some(MessageCounts::new(30, 50)),
+            delimiter.clone(),
+            vec![],
+            true,
+            "box2.box1.box2",
+            "box6",
+        );
 
-impl Into<MailBox> for MailBoxNode {
-    fn into(self) -> MailBox {
-        let children: Vec<MailBox> = self
-            .children
-            .into_iter()
-            .map(|(_, value)| value.into())
-            .collect();
+        let box3 = MailBox::new(
+            None,
+            delimiter.clone(),
+            vec![box5, box6],
+            true,
+            "box2.box1",
+            "box3",
+        );
 
-        MailBox::new(
-            self.counts,
-            self.delimiter,
-            children,
-            self.selectable,
-            self.id,
-            self.name,
-        )
+        let box4 = MailBox::new(None, delimiter.clone(), vec![], true, "box2.box2", "box4");
+
+        let box2 = MailBox::new(
+            None,
+            delimiter.clone(),
+            vec![box3, box4],
+            true,
+            "box2",
+            "box2",
+        );
+
+        println!("{}", box2);
+
+        let tree: MailBoxList = vec![box2, box1].into();
+
+        println!("{}", tree)
     }
 }
