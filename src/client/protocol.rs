@@ -3,16 +3,15 @@ use async_trait::async_trait;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    error::Result,
-    types::{
-        incoming::{
-            mailbox::{MailBox, MailBoxList},
-            message::{Message, Preview},
-        },
-        outgoing::message::SendableMessage,
-        ConnectionSecurity,
+use crate::error::Result;
+
+use super::{
+    connection::ConnectionSecurity,
+    incoming::types::{
+        mailbox::{MailBox, MailBoxList},
+        message::{Message, Preview},
     },
+    outgoing::types::message::SendableMessage,
 };
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

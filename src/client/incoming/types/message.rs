@@ -4,11 +4,11 @@ use std::{collections::HashMap, result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    client::{address::Address, builder::MessageBuilder, content::Content, Headers},
     error::{err, Error, ErrorKind},
-    types::{Address, Content, Headers, MessageBuilder},
 };
 
-use super::flags::Flag;
+use super::flag::Flag;
 
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

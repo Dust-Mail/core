@@ -4,7 +4,7 @@ use autoconfig::{self, config};
 #[cfg(feature = "autodiscover")]
 use ms_autodiscover::types as autodiscover;
 
-use crate::types::ConnectionSecurity;
+use crate::client::connection::ConnectionSecurity;
 
 use super::{
     config::OAuth2Config, error::Result, AuthenticationType, Config, ConfigType, ServerConfig,

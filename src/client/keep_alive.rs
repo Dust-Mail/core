@@ -8,7 +8,7 @@ use crate::runtime::{
 
 use log::{info, trace, warn};
 
-use crate::EmailClient;
+use super::EmailClient;
 
 pub struct KeepAlive {
     client: Arc<RwLock<EmailClient>>,

@@ -1,8 +1,8 @@
 use std::result;
 
 use crate::{
+    client::{address::Address, builder::MessageBuilder, content::Content},
     error::{err, Error, ErrorKind},
-    types::{Address, Content, MessageBuilder},
 };
 
 use email::{Header, MimeMessage};
@@ -174,8 +174,8 @@ mod test {
     #[test]
     fn test_to_mime() {
         let builder = MessageBuilder::new()
-            .recipients(vec!["Tester <test@example.com>".parse().unwrap()])
-            .senders(vec![()])
+            .recipients(vec![("Tester", "test@example.com")])
+            .senders(vec![("User", "user@example.com")])
             .subject("Test email")
             .text("Hello world!")
             .html(

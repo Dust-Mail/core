@@ -1,18 +1,21 @@
 use crate::{
-    client::protocol::{OutgoingProtocol, SmtpCredentials},
+    client::{
+        connection::ConnectionSecurity,
+        protocol::{OutgoingProtocol, SmtpCredentials},
+        Credentials, ServerCredentials,
+    },
     error::Result,
-    types::{outgoing::message::SendableMessage, ConnectionSecurity},
-    Credentials, ServerCredentials,
+    runtime::{
+        io::{BufRead, BufStream, Write},
+        net::TcpStream,
+    },
 };
 
 use async_native_tls::{TlsConnector, TlsStream};
 use async_smtp::{self, authentication::Mechanism, SmtpTransport};
 use async_trait::async_trait;
 
-use crate::runtime::{
-    io::{BufRead, BufStream, Write},
-    net::TcpStream,
-};
+use super::types::message::SendableMessage;
 
 pub struct SmtpClient {
     credentials: SmtpCredentials,
@@ -140,7 +143,7 @@ mod test {
 
     use dotenv::dotenv;
 
-    use crate::{client::protocol::RemoteServer, types::MessageBuilder, Credentials};
+    use crate::client::{builder::MessageBuilder, protocol::RemoteServer};
 
     use super::*;
 
@@ -171,8 +174,8 @@ mod test {
         env_logger::init();
         let mut client = create_test_session().await;
 
-        let to = "Guus <guusvanmeerveld@gmail.com>".parse().unwrap();
-        let from = "Guus <mail@guusvanmeerveld.dev>".parse().unwrap();
+        let to = ("Sam", "mail@samtaen.nl");
+        let from = ("Guus", "mail@guusvanmeerveld.dev");
 
         let message = MessageBuilder::new()
             .recipients(vec![to])

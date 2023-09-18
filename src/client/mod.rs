@@ -1,15 +1,8 @@
-use std::{fmt::Display, sync::Arc};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use crate::{
     error::{Error, ErrorKind},
     runtime::thread::RwLock,
-    types::{
-        incoming::{
-            mailbox::{MailBox, MailBoxList},
-            message::{Message, Preview},
-        },
-        outgoing::message::SendableMessage,
-    },
 };
 
 #[cfg(feature = "imap")]
@@ -21,7 +14,14 @@ use self::incoming::pop;
 #[cfg(all(feature = "smtp", feature = "runtime-tokio"))]
 use self::outgoing::smtp;
 
-use self::protocol::{IncomingProtocol, OutgoingProtocol};
+use self::{
+    incoming::types::{
+        mailbox::{MailBox, MailBoxList},
+        message::{Message, Preview},
+    },
+    outgoing::types::message::SendableMessage,
+    protocol::{IncomingProtocol, OutgoingProtocol},
+};
 
 pub use self::{
     keep_alive::KeepAlive,
@@ -33,9 +33,17 @@ use crate::error::Result;
 mod incoming;
 mod outgoing;
 
+pub mod address;
+pub mod builder;
+pub mod connection;
+pub mod content;
+mod parser;
+
 mod protocol;
 
 mod keep_alive;
+
+pub type Headers = HashMap<String, String>;
 
 pub struct EmailClient {
     incoming: Box<dyn IncomingProtocol + Sync + Send>,

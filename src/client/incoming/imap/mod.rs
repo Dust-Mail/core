@@ -6,18 +6,18 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::{
+    cache::{Cache, Refresher},
+    client::{
+        builder::MessageBuilder,
+        connection::ConnectionSecurity,
+        protocol::{ImapCredentials, IncomingProtocol},
+        Credentials, ServerCredentials,
+    },
+    error::{err, Error, ErrorKind, Result},
     runtime::{
         io::{Read, Write},
         net::TcpStream,
         time::{Duration, Instant},
-    },
-    types::{
-        incoming::{
-            flags::Flag,
-            mailbox::{MailBox, MailBoxList, MessageCounts},
-            message::{Message, Preview},
-        },
-        MessageBuilder,
     },
 };
 
@@ -26,16 +26,14 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use log::{debug, info};
 
-use crate::cache::{Cache, Refresher};
-use crate::client::protocol::{Credentials, ImapCredentials, IncomingProtocol, ServerCredentials};
-
-use crate::{
-    error::{err, Error, ErrorKind, Result},
-    types::ConnectionSecurity,
-};
-
 use self::oauth::OAuthCredentials;
 use self::query::QueryBuilder;
+
+use super::types::{
+    flag::Flag,
+    mailbox::{MailBox, MailBoxList, MessageCounts},
+    message::{Message, Preview},
+};
 
 const REFRESH_BOX_LIST: Duration = Duration::from_secs(10);
 const REFRESH_MESSAGE_COUNT: Duration = Duration::from_secs(60);

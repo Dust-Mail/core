@@ -10,28 +10,25 @@ use async_pop::response::{
 use async_trait::async_trait;
 
 use crate::{
-    error::err,
+    client::{
+        builder::MessageBuilder,
+        connection::ConnectionSecurity,
+        protocol::{Credentials, IncomingProtocol, PopCredentials, ServerCredentials},
+    },
+    error::{err, ErrorKind, Result},
     runtime::{
         io::{Read, Write},
         net::TcpStream,
     },
-    types::{
-        incoming::{
-            flags::Flag,
-            mailbox::{MailBox, MailBoxList, MessageCounts},
-            message::{Message, Preview},
-        },
-        MessageBuilder,
-    },
-};
-
-use crate::{
-    client::protocol::{Credentials, IncomingProtocol, PopCredentials, ServerCredentials},
-    error::{ErrorKind, Result},
-    types::ConnectionSecurity,
 };
 
 use self::constants::{ACTIVITY_TIMEOUT, MAILBOX_DEFAULT_NAME};
+
+use super::types::{
+    flag::Flag,
+    mailbox::{MailBox, MailBoxList, MessageCounts},
+    message::{Message, Preview},
+};
 
 pub struct PopClient<S: Read + Write + Unpin> {
     session: async_pop::Client<S>,

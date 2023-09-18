@@ -1,3 +1,5 @@
+pub mod types;
+
 #[cfg(feature = "imap")]
 pub mod imap;
 

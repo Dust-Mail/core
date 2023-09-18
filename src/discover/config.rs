@@ -1,10 +1,9 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::client::connection::ConnectionSecurity;
 #[cfg(feature = "json")]
 use crate::error::Result;
-
-use crate::types::ConnectionSecurity;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

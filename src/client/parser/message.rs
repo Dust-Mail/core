@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use chrono::DateTime;
 
 use crate::{
+    client::{address::Address, builder::MessageBuilder, content::Content, Headers},
     error::Result,
-    types::{parser, Address, Content, Headers, MessageBuilder},
 };
 
 pub fn from_headers<B: AsRef<[u8]>>(response: B) -> Result<Headers> {
@@ -40,12 +40,12 @@ pub fn from_body<B: AsRef<[u8]>>(body: B) -> Result<Content> {
 
                 if value.starts_with("text/plain") {
                     text = match body {
-                        Some(body_data) => Some(parser::sanitize_text(&body_data)),
+                        Some(body_data) => Some(super::sanitize_text(&body_data)),
                         None => None,
                     }
                 } else if value.starts_with("text/html") {
                     html = match body {
-                        Some(body_data) => Some(parser::sanitize_html(&body_data)),
+                        Some(body_data) => Some(super::sanitize_html(&body_data)),
                         None => None,
                     }
                 }
