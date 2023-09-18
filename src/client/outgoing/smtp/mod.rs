@@ -2,10 +2,11 @@ use crate::{
     client::protocol::{OutgoingProtocol, SmtpCredentials},
     error::Result,
     types::{outgoing::message::SendableMessage, ConnectionSecurity},
+    Credentials, ServerCredentials,
 };
 
 use async_native_tls::{TlsConnector, TlsStream};
-use async_smtp::{self, SmtpTransport};
+use async_smtp::{self, authentication::Mechanism, SmtpTransport};
 use async_trait::async_trait;
 
 use crate::runtime::{
@@ -68,25 +69,58 @@ async fn send<S: BufRead + Write + Unpin>(
     Ok(())
 }
 
+const PASSWORD_MECHANISMS: [Mechanism; 2] = [Mechanism::Plain, Mechanism::Login];
+const OAUTH_MECHANISMS: [Mechanism; 1] = [Mechanism::Xoauth2];
+
+async fn login<S: BufRead + Write + Unpin>(
+    transport: &mut SmtpTransport<S>,
+    creds: &Credentials,
+) -> Result<()> {
+    match creds {
+        Credentials::Password { username, password } => {
+            let smtp_credentials =
+                async_smtp::authentication::Credentials::new(username.clone(), password.clone());
+
+            transport
+                .try_login(&smtp_credentials, &PASSWORD_MECHANISMS)
+                .await?;
+        }
+        Credentials::OAuth { username, token } => {
+            let smtp_credentials =
+                async_smtp::authentication::Credentials::new(username.clone(), token.clone());
+
+            transport
+                .try_login(&smtp_credentials, &OAUTH_MECHANISMS)
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
 #[async_trait]
 impl OutgoingProtocol for SmtpClient {
     async fn send_message(&mut self, message: SendableMessage) -> Result<()> {
         match self.credentials.server().security() {
             ConnectionSecurity::Tls => {
-                let transport = connect(
+                let mut transport = connect(
                     self.credentials.server().domain(),
                     self.credentials.server().port(),
                 )
                 .await?;
 
+                login(&mut transport, self.credentials.credentials()).await?;
+
                 send(transport, message).await
             }
             _ => {
-                let transport = connect_plain(
+                let mut transport = connect_plain(
                     self.credentials.server().domain(),
                     self.credentials.server().port(),
                 )
                 .await?;
+
+                login(&mut transport, self.credentials.credentials()).await?;
 
                 send(transport, message).await
             }
@@ -98,4 +132,57 @@ pub fn create(credentials: SmtpCredentials) -> Result<Box<dyn OutgoingProtocol +
     let client = SmtpClient::new(credentials);
 
     Ok(Box::new(client))
+}
+
+#[cfg(test)]
+mod test {
+    use std::env;
+
+    use dotenv::dotenv;
+
+    use crate::{client::protocol::RemoteServer, types::MessageBuilder, Credentials};
+
+    use super::*;
+
+    async fn create_test_session() -> Box<dyn OutgoingProtocol + Send + Sync> {
+        dotenv().ok();
+
+        let server = RemoteServer::new(
+            env::var("SMTP_SERVER").unwrap(),
+            465,
+            ConnectionSecurity::Tls,
+        );
+
+        let creds = Credentials::password(
+            env::var("SMTP_USERNAME").unwrap(),
+            env::var("SMTP_PASSWORD").unwrap(),
+        );
+
+        let smtp_creds = SmtpCredentials::new(server, creds);
+
+        let client = create(smtp_creds).unwrap();
+
+        client
+    }
+
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    async fn test_send() {
+        env_logger::init();
+        let mut client = create_test_session().await;
+
+        let to = "Guus <guusvanmeerveld@gmail.com>".parse().unwrap();
+        let from = "Guus <mail@guusvanmeerveld.dev>".parse().unwrap();
+
+        let message = MessageBuilder::new()
+            .recipients(vec![to])
+            .senders(vec![from])
+            .subject("Test email")
+            .text("This is sent from dust mail!");
+
+        client
+            .send_message(message.try_into().unwrap())
+            .await
+            .unwrap();
+    }
 }

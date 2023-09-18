@@ -54,6 +54,22 @@ pub enum Credentials {
     OAuth { username: String, token: String },
 }
 
+impl Credentials {
+    pub fn password<U: Into<String>, P: Into<String>>(username: U, password: P) -> Self {
+        Credentials::Password {
+            username: username.into(),
+            password: password.into(),
+        }
+    }
+
+    pub fn oauth<U: Into<String>, T: Into<String>>(username: U, token: T) -> Self {
+        Credentials::OAuth {
+            username: username.into(),
+            token: token.into(),
+        }
+    }
+}
+
 pub trait ServerCredentials {
     fn credentials(&self) -> &Credentials;
 }
