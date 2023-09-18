@@ -109,7 +109,7 @@ impl TryFrom<MessageBuilder> for Message {
             id,
             sent: builder.sent,
             subject: builder.subject,
-            content: builder.content.unwrap_or_default(),
+            content: builder.content,
             headers: builder.headers.unwrap_or(HashMap::new()),
         };
 

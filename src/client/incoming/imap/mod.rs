@@ -529,8 +529,7 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
 
                         let builder: MessageBuilder = headers.try_into()?;
 
-                        let preview: Preview =
-                            builder.add_flags(flags).set_id(message_id).build()?;
+                        let preview: Preview = builder.flags(flags).id(message_id).build()?;
 
                         previews.push(preview);
                     }
@@ -598,7 +597,7 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
             Some(body) => {
                 let builder: MessageBuilder = body.try_into()?;
 
-                let message: Message = builder.add_flags(flags).set_id(message_id).build()?;
+                let message: Message = builder.flags(flags).id(message_id).build()?;
 
                 Ok(message)
             }

@@ -5,7 +5,7 @@ use std::{collections::HashMap, fmt::Display};
 use async_native_tls::{TlsConnector, TlsStream};
 use async_pop::response::{
     types::DataType,
-    uidl::{Uidl, UidlResponse, UniqueId},
+    uidl::{UidlResponse, UniqueId},
 };
 use async_trait::async_trait;
 
@@ -27,7 +27,7 @@ use crate::{
 
 use crate::{
     client::protocol::{Credentials, IncomingProtocol, PopCredentials, ServerCredentials},
-    error::{Error, ErrorKind, Result},
+    error::{ErrorKind, Result},
     types::ConnectionSecurity,
 };
 
@@ -182,7 +182,7 @@ impl<S: Read + Write + Unpin> PopSession<S> {
     pub fn new(session: async_pop::Client<S>) -> Self {
         Self {
             session,
-            mailbox_list: MailBoxList::new(Vec::new()),
+            mailbox_list: MailBoxList::default(),
             unique_id_map: UniqueIdMap::new(),
         }
     }
@@ -209,7 +209,7 @@ impl<S: Read + Write + Unpin> PopSession<S> {
         Ok(mailbox)
     }
 
-    async fn update_map(&mut self) -> Result<()> {
+    async fn update_uidl_map(&mut self) -> Result<()> {
         let uidl = match self.session.uidl(None).await? {
             UidlResponse::Multiple(list) => list,
             _ => unreachable!(),
@@ -225,7 +225,7 @@ impl<S: Read + Write + Unpin> PopSession<S> {
             return Ok(index);
         };
 
-        self.update_map().await?;
+        self.update_uidl_map().await?;
 
         match self.unique_id_map.get(&unique_id) {
             Some(msg_number) => Ok(msg_number),
@@ -275,6 +275,8 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
     }
 
     async fn logout(&mut self) -> Result<()> {
+        self.unique_id_map.reset();
+
         self.session.quit().await?;
 
         Ok(())
@@ -322,24 +324,20 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
 
         let mut previews: Vec<Preview> = Vec::with_capacity(msg_count);
 
-        let mut unique_id_map = HashMap::new();
-
         for msg_number in sequence_start..sequence_end {
-            let uidl_response = self.session.uidl(Some(msg_number)).await?;
+            let unique_id = match self.unique_id_map.get_id(msg_number) {
+                Some(id) => id.to_string(),
+                None => {
+                    let uidl_response = self.session.uidl(Some(msg_number)).await?;
 
-            let unique_id = match &uidl_response {
-                UidlResponse::Multiple(list) => {
-                    let first = list.items().first().ok_or(Error::new(
-                        ErrorKind::UnexpectedBehavior,
-                        "Missing unique id for message",
-                    ))?;
+                    let unique_id = match &uidl_response {
+                        UidlResponse::Multiple(_) => unreachable!(),
+                        UidlResponse::Single(item) => item.id(),
+                    };
 
-                    first.id()
+                    unique_id.value()?
                 }
-                UidlResponse::Single(item) => item.id(),
             };
-
-            let unique_id = unique_id.value()?;
 
             let body = self.session.top(msg_number, 0).await?;
 
@@ -352,16 +350,10 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
 
             let builder: MessageBuilder = body.as_ref().try_into()?;
 
-            let preview: Preview = builder.add_flags(flags).set_id(&unique_id).build()?;
-
-            // Add the unique id to the local map so we don't have to retrieve the entire list of unique id's later
-            // just to get this message's msg_number.
-            unique_id_map.insert(unique_id, msg_number);
+            let preview: Preview = builder.flags(flags).id(&unique_id).build()?;
 
             previews.push(preview)
         }
-
-        // self.unique_id_map.extend(unique_id_map);
 
         Ok(previews)
     }
@@ -380,7 +372,7 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
 
         let builder: MessageBuilder = body.as_ref().try_into()?;
 
-        let message: Message = builder.add_flags(flags).set_id(message_id).build()?;
+        let message: Message = builder.flags(flags).id(message_id).build()?;
 
         Ok(message)
     }
@@ -418,12 +410,7 @@ mod test {
         let previews = session.get_messages("Inbox", 0, 10).await.unwrap();
 
         for preview in previews.iter() {
-            println!(
-                "{}: {:?}, \"{}\"",
-                preview.id(),
-                preview.sent(),
-                preview.subject().unwrap()
-            );
+            println!("{:?}", preview);
         }
     }
 

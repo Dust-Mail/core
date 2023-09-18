@@ -6,7 +6,7 @@ mod parser;
 pub mod incoming;
 pub mod outgoing;
 
-use std::{collections::HashMap, fmt::Display, result};
+use std::{collections::HashMap, fmt::Display, result, str::FromStr};
 
 pub use client::*;
 pub use connection::ConnectionSecurity;
@@ -50,6 +50,14 @@ impl Content {
         Self::new(Some(text.into()), None)
     }
 
+    fn set_text<T: Into<String>>(&mut self, text: T) {
+        self.text = Some(text.into())
+    }
+
+    fn set_html<H: Into<String>>(&mut self, html: H) {
+        self.html = Some(html.into())
+    }
+
     /// The message in pure text form.
     pub fn text(&self) -> Option<&str> {
         match &self.text {
@@ -71,17 +79,49 @@ impl Content {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Address {
     name: Option<String>,
-    address: Option<String>,
+    address: String,
+}
+
+impl<N: Into<String>, A: Into<String>> From<(N, A)> for Address {
+    fn from((name, address): (N, A)) -> Self {
+        Self::new(Some(name.into()), address.into())
+    }
+}
+
+impl FromStr for Address {
+    type Err = Error;
+
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
+        Ok(email::Mailbox::from_str(s)?.into())
+    }
+}
+
+impl Into<email::Address> for Address {
+    fn into(self) -> email::Address {
+        match self.name {
+            Some(name) => email::Address::new_mailbox_with_name(name, self.address),
+            None => email::Address::new_mailbox(self.address),
+        }
+    }
+}
+
+impl Into<email::Mailbox> for Address {
+    fn into(self) -> email::Mailbox {
+        match self.name {
+            Some(name) => email::Mailbox::new_with_name(name, self.address),
+            None => email::Mailbox::new(self.address),
+        }
+    }
 }
 
 impl From<email::Mailbox> for Address {
     fn from(mailbox: email::Mailbox) -> Self {
-        Address::new(mailbox.name, Some(mailbox.address))
+        Address::new(mailbox.name, mailbox.address)
     }
 }
 
 impl Address {
-    pub fn new(name: Option<String>, address: Option<String>) -> Self {
+    pub fn new(name: Option<String>, address: String) -> Self {
         Self { name, address }
     }
 
@@ -89,19 +129,14 @@ impl Address {
         &self.name
     }
 
-    pub fn address(&self) -> &Option<String> {
+    pub fn address(&self) -> &str {
         &self.address
     }
 
-    pub fn full(&self) -> Option<String> {
-        if self.address.is_some() && self.name.is_some() {
-            Some(format!(
-                "{} <{}>",
-                self.name.as_ref().unwrap(),
-                self.address.as_ref().unwrap()
-            ))
-        } else {
-            None
+    pub fn full(&self) -> String {
+        match self.name.as_ref() {
+            Some(name) => format!("{} <{}>", name, self.address),
+            None => self.address.to_string(),
         }
     }
 
@@ -120,7 +155,7 @@ pub struct MessageBuilder {
     sent: Option<i64>,
     subject: Option<String>,
     headers: Option<Headers>,
-    content: Option<Content>,
+    content: Content,
 }
 
 impl TryFrom<&[u8]> for MessageBuilder {
@@ -142,12 +177,12 @@ impl MessageBuilder {
             id: None,
             sent: None,
             subject: None,
-            content: None,
+            content: Content::default(),
             headers: None,
         }
     }
 
-    pub fn add_flags<F: IntoIterator<Item = Flag>>(mut self, flags: F) -> Self {
+    pub fn flags<F: IntoIterator<Item = Flag>>(mut self, flags: F) -> Self {
         let mut iter = flags.into_iter();
 
         while let Some(flag) = iter.next() {
@@ -157,7 +192,7 @@ impl MessageBuilder {
         self
     }
 
-    pub fn add_senders<C: IntoIterator<Item = Address>>(mut self, sender: C) -> Self {
+    pub fn senders<C: IntoIterator<Item = Address>>(mut self, sender: C) -> Self {
         let mut iter = sender.into_iter();
 
         while let Some(address) = iter.next() {
@@ -166,7 +201,8 @@ impl MessageBuilder {
 
         self
     }
-    pub fn add_recipients<C: IntoIterator<Item = Address>>(mut self, recipient: C) -> Self {
+
+    pub fn recipients<C: IntoIterator<Item = Address>>(mut self, recipient: C) -> Self {
         let mut iter = recipient.into_iter();
 
         while let Some(address) = iter.next() {
@@ -176,7 +212,7 @@ impl MessageBuilder {
         self
     }
 
-    pub fn add_cc<C: IntoIterator<Item = Address>>(mut self, cc: C) -> Self {
+    pub fn cc<C: IntoIterator<Item = Address>>(mut self, cc: C) -> Self {
         let mut iter = cc.into_iter();
 
         while let Some(address) = iter.next() {
@@ -186,7 +222,7 @@ impl MessageBuilder {
         self
     }
 
-    pub fn add_bcc<C: IntoIterator<Item = Address>>(mut self, bcc: C) -> Self {
+    pub fn bcc<C: IntoIterator<Item = Address>>(mut self, bcc: C) -> Self {
         let mut iter = bcc.into_iter();
 
         while let Some(address) = iter.next() {
@@ -196,32 +232,38 @@ impl MessageBuilder {
         self
     }
 
-    pub fn set_id<I: Display>(mut self, id: I) -> Self {
+    pub fn id<I: Display>(mut self, id: I) -> Self {
         self.id = Some(id.to_string());
 
         self
     }
 
-    pub fn set_sent(mut self, sent: i64) -> Self {
+    pub fn sent(mut self, sent: i64) -> Self {
         self.sent = Some(sent);
 
         self
     }
 
-    pub fn set_subject<S: Display>(mut self, subject: S) -> Self {
+    pub fn subject<S: Display>(mut self, subject: S) -> Self {
         self.subject = Some(subject.to_string());
 
         self
     }
 
-    pub fn set_headers(mut self, headers: Headers) -> Self {
+    pub fn headers(mut self, headers: Headers) -> Self {
         self.headers = Some(headers);
 
         self
     }
 
-    pub fn set_content<C: Into<Content>>(mut self, content: C) -> Self {
-        self.content = Some(content.into());
+    pub fn html<H: Into<String>>(mut self, html: H) -> Self {
+        self.content.set_html(html);
+
+        self
+    }
+
+    pub fn text<H: Into<String>>(mut self, text: H) -> Self {
+        self.content.set_text(text);
 
         self
     }
