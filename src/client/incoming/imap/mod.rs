@@ -1,12 +1,10 @@
 mod oauth;
 mod query;
 
-use std::collections::HashMap;
 // use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::{
-    cache::{Cache, Refresher},
     client::{
         builder::MessageBuilder,
         connection::ConnectionSecurity,
@@ -31,112 +29,11 @@ use self::query::QueryBuilder;
 
 use super::types::{
     flag::Flag,
-    mailbox::{MailBox, MailBoxList, MessageCounts},
+    mailbox::{Mailbox, MailboxList, MailboxStats},
     message::{Message, Preview},
 };
 
-const REFRESH_BOX_LIST: Duration = Duration::from_secs(10);
-const REFRESH_MESSAGE_COUNT: Duration = Duration::from_secs(60);
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(29 * 60);
-
-struct BoxListRefresher<'a, S: Read + Write + Unpin + Debug + Send + Sync> {
-    session: &'a mut async_imap::Session<S>,
-    selected_box: &'a mut Option<String>,
-    message_count: &'a mut HashMap<String, Cache<MessageCounts>>,
-}
-
-#[async_trait]
-impl<S: Read + Write + Unpin + Debug + Send + Sync> Refresher<MailBoxList>
-    for BoxListRefresher<'_, S>
-{
-    async fn refresh(&mut self) -> Result<MailBoxList> {
-        debug!("Refreshing box list");
-
-        // A planar graph of all of the mailboxes in the users account
-        let mut mailboxes_planar: Vec<MailBox> = Vec::new();
-
-        {
-            let mut mailbox_stream = self.session.list(None, Some("*")).await?;
-
-            while let Some(mailbox) = mailbox_stream.next().await {
-                if let Ok(mailbox) = mailbox {
-                    mailboxes_planar.push(MailBox::from(mailbox));
-                }
-            }
-        }
-
-        let mut boxes = MailBoxList::new(mailboxes_planar);
-
-        let selected_box_before_refresh = self.selected_box.clone();
-
-        for mailbox_mut in boxes.get_vec_mut() {
-            if *mailbox_mut.selectable() {
-                let message_counts_cache = self
-                    .message_count
-                    .entry(mailbox_mut.id().to_string())
-                    .or_insert(Cache::new(REFRESH_MESSAGE_COUNT));
-
-                let mut message_count_refresher = MessageCountRefresher {
-                    selected_box: &mut self.selected_box,
-                    box_id: mailbox_mut.id(),
-                    session: &mut self.session,
-                };
-
-                let message_count = message_counts_cache
-                    .get(&mut message_count_refresher)
-                    .await?;
-
-                // debug!("{:?}", message_count);
-
-                mailbox_mut.create_counts(message_count.clone())
-            }
-        }
-
-        // This is kind of a hacky work around we have to use,
-        // as refreshing the message count will select a different mailbox because we cannot use the STATUS command at the moment
-        if selected_box_before_refresh != *self.selected_box {
-            debug!(
-                "Selected box ({:?}, {:?}) changed when updating message counts, returning to old box",
-                selected_box_before_refresh,
-				self.selected_box
-            );
-            if let Some(selected_box_before_refresh) = selected_box_before_refresh.as_ref() {
-                self.session.select(selected_box_before_refresh).await?;
-            } else {
-                debug!("Closed the box");
-                self.session.close().await?;
-            }
-
-            *self.selected_box = selected_box_before_refresh
-        }
-
-        Ok(boxes)
-    }
-}
-
-struct MessageCountRefresher<'a, S: Read + Write + Unpin + Debug + Send> {
-    session: &'a mut async_imap::Session<S>,
-    selected_box: &'a mut Option<String>,
-    box_id: &'a str,
-}
-
-#[async_trait]
-impl<S: Read + Write + Unpin + Debug + Send + Sync> Refresher<MessageCounts>
-    for MessageCountRefresher<'_, S>
-{
-    async fn refresh(&mut self) -> Result<MessageCounts> {
-        debug!("Refreshing message counts for {}", self.box_id);
-        // TODO: use STATUS command
-        // The status command always returns `total: 0` and `unseen: 0`, so for now we use examine to retrieve the message counts
-        let imap_counts = self.session.examine(self.box_id).await?;
-
-        let counts = MessageCounts::from(imap_counts);
-
-        *self.selected_box = Some(self.box_id.to_string());
-
-        Ok(counts)
-    }
-}
 
 pub struct ImapClient<S: Read + Write + Unpin + Debug + Send> {
     client: async_imap::Client<S>,
@@ -144,11 +41,8 @@ pub struct ImapClient<S: Read + Write + Unpin + Debug + Send> {
 
 pub struct ImapSession<S: Write + Read + Unpin + Debug + Send + Sync> {
     session: async_imap::Session<S>,
-    /// Counts per box
-    message_count: HashMap<String, Cache<MessageCounts>>,
-    box_list: Cache<MailBoxList>,
-    /// The currently selected box' id.
-    selected_box: Option<String>,
+    /// The currently selected box' id and its stats.
+    selected_box: Option<(String, MailboxStats)>,
     last_keep_alive: Option<Instant>,
 }
 
@@ -222,12 +116,8 @@ pub async fn create(
 
 impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapClient<S> {
     fn new_imap_session(session: async_imap::Session<S>) -> ImapSession<S> {
-        let box_list_cache = Cache::new(REFRESH_BOX_LIST);
-
         ImapSession {
             session,
-            message_count: HashMap::new(),
-            box_list: box_list_cache,
             selected_box: None,
             last_keep_alive: None,
         }
@@ -273,30 +163,6 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapSession<S> {
         &mut self.session
     }
 
-    async fn get_mailbox_list(&mut self) -> Result<&MailBoxList> {
-        let mut refresher = BoxListRefresher {
-            selected_box: &mut self.selected_box,
-            session: &mut self.session,
-            message_count: &mut self.message_count,
-        };
-
-        let mail_box_list = self.box_list.get(&mut refresher).await?;
-
-        Ok(mail_box_list)
-    }
-
-    async fn get_mailbox_list_mut(&mut self) -> Result<&mut MailBoxList> {
-        let mut refresher = BoxListRefresher {
-            selected_box: &mut self.selected_box,
-            session: &mut self.session,
-            message_count: &mut self.message_count,
-        };
-
-        let mail_box_list_mut = self.box_list.get_mut(&mut refresher).await?;
-
-        Ok(mail_box_list_mut)
-    }
-
     /// This function will check if a box with a given box id is actually selectable, throwing an error if it is not.
     async fn check_selectable(&mut self, box_id: &str) -> Result<()> {
         let box_list = self.get_mailbox_list().await?;
@@ -319,52 +185,40 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapSession<S> {
         Ok(())
     }
 
-    /// Select a given box if it hasn't already been selected, otherwise return the already selected box.
-    async fn select(&mut self, box_id: &str) -> Result<&MailBox> {
-        let box_id = box_id.trim();
+    async fn close(&mut self) -> Result<()> {
+        if let Some(_) = self.selected_box {
+            self.session.close().await?;
 
-        let box_is_selected_already = self.selected_box.is_some();
+            self.selected_box = None;
+        }
+
+        Ok(())
+    }
+
+    /// Select a given box if it hasn't already been selected, otherwise return the already selected box.
+    async fn select<I: Into<String>>(&mut self, box_id: I) -> Result<&MailboxStats> {
+        let box_id = box_id.into();
 
         // If there is no box selected yet or the box we have selected is not the box we want to select, we have to request the server.
-        if !box_is_selected_already || self.selected_box.as_ref().unwrap() != box_id {
+        if !self.selected_box.is_some() || self.selected_box.as_ref().unwrap().0 != box_id {
             debug!("Selecting box: {}", box_id);
 
-            let session = self.inner_mut();
-
             // If there is already a box selected we must close it first
-            if box_is_selected_already {
-                session.close().await?;
-            }
+            self.close().await?;
 
-            let imap_counts = session.select(&box_id).await?;
+            let imap_stats = self.session.select(&box_id).await?;
 
-            let message_counts = MessageCounts::from(imap_counts);
-
-            // Update the cached value so we don't refetch it in the near future.
-            if let Some(cached_message_count) = self.message_count.get_mut(box_id) {
-                cached_message_count.set(message_counts.clone());
-            }
-
-            self.selected_box = Some(String::from(box_id));
-
-            let box_list_mut = self.get_mailbox_list_mut().await?;
-
-            if let Some(box_mut) = box_list_mut.get_box_mut(box_id) {
-                debug!("Creating counts for: {:?}", box_mut);
-                box_mut.create_counts(message_counts);
-            }
+            self.selected_box = Some((box_id, imap_stats.into()));
         };
 
-        let box_list = self.get_mailbox_list().await?;
-
-        if let Some(found_box) = box_list.get_box(box_id) {
-            Ok(found_box)
-        } else {
-            Err(Error::new(
-                ErrorKind::MailBoxNotFound,
-                "Could not find a mailbox with that id",
-            ))
+        if let Some((_id, stats)) = self.selected_box.as_ref() {
+            return Ok(stats);
         }
+
+        err!(
+            ErrorKind::MailBoxNotFound,
+            "Could not find a mailbox with that id",
+        )
     }
 }
 
@@ -386,22 +240,53 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
         }
     }
 
-    async fn get_mailbox_list(&mut self) -> Result<&MailBoxList> {
-        let mailbox_list = self.get_mailbox_list().await?;
+    async fn get_mailbox_list(&mut self) -> Result<MailboxList> {
+        let mut mailboxes: Vec<Mailbox> = Vec::new();
 
-        Ok(mailbox_list)
+        self.close().await?;
+
+        {
+            let mut mailbox_stream = self.session.list(None, Some("*")).await?;
+
+            while let Some(mailbox) = mailbox_stream.next().await {
+                mailboxes.push(mailbox?.into());
+            }
+        }
+
+        Ok(mailboxes.into())
     }
 
-    async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<&MailBox> {
-        let mailbox_list = self.get_mailbox_list().await?;
+    async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<Mailbox> {
+        let stats = self.select(mailbox_id).await?.clone();
 
-        if let Some(mailbox) = mailbox_list.get_box(mailbox_id) {
-            Ok(mailbox)
-        } else {
-            Err(Error::new(
-                ErrorKind::MailBoxNotFound,
-                format!("Could not find a mailbox with id {}", mailbox_id),
-            ))
+        let mut mailboxes: Vec<Mailbox> = Vec::new();
+
+        {
+            let mut mailbox_stream = self.session.list(Some(mailbox_id), Some("*")).await?;
+
+            while let Some(mailbox) = mailbox_stream.next().await {
+                mailboxes.push(mailbox?.into());
+            }
+        }
+
+        let tree: MailboxList = mailboxes.into();
+
+        match tree
+            .to_vec()
+            .into_iter()
+            .find(|mailbox| mailbox.id() == mailbox_id)
+        {
+            Some(mut mailbox) => {
+                mailbox.add_stats(stats);
+
+                Ok(mailbox)
+            }
+            None => {
+                err!(
+                    ErrorKind::MailBoxNotFound,
+                    "Could not find a mailbox with that id",
+                )
+            }
         }
     }
 
@@ -420,12 +305,7 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
     }
 
     async fn rename_mailbox(&mut self, box_id: &str, new_name: &str) -> Result<()> {
-        let mailbox_list = self.get_mailbox_list().await?;
-
-        let mailbox = mailbox_list.get_box(box_id).ok_or(Error::new(
-            ErrorKind::MessageNotFound,
-            format!("Message with id {} could not be found", box_id),
-        ))?;
+        let mailbox = self.get_mailbox(box_id).await?;
 
         let new_name = match mailbox.delimiter() {
             Some(delimiter) => {
@@ -474,70 +354,66 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
     ) -> Result<Vec<Preview>> {
         self.check_selectable(box_id).await?;
 
-        let selected_box = self.select(&box_id).await?;
+        let stats = self.select(box_id).await?;
 
-        if let Some(counts) = selected_box.counts() {
-            let total_messages = *counts.total();
+        let total_messages = stats.total();
 
-            if total_messages < 1 {
-                return Ok(Vec::new());
-            }
+        if total_messages < 1 {
+            return Ok(Vec::new());
+        }
 
-            let sequence_start = if total_messages < end {
-                1
-            } else {
-                total_messages.saturating_sub(end).saturating_add(1)
-            };
+        let sequence_start = if total_messages < end {
+            1
+        } else {
+            total_messages.saturating_sub(end).saturating_add(1)
+        };
 
-            let sequence_end = if total_messages < start {
-                1
-            } else {
-                total_messages.saturating_sub(start)
-            };
+        let sequence_end = if total_messages < start {
+            1
+        } else {
+            total_messages.saturating_sub(start)
+        };
 
-            let sequence = format!("{}:{}", sequence_start, sequence_end);
+        let sequence = format!("{}:{}", sequence_start, sequence_end);
 
-            let session = self.inner_mut();
+        let session = self.inner_mut();
 
-            let mut previews = Vec::new();
+        let mut previews = Vec::new();
 
-            let query = QueryBuilder::default()
-                .headers(vec!["From", "Date", "Subject"])
-                .build();
+        let query = QueryBuilder::default()
+            .headers(vec!["From", "Date", "Subject"])
+            .build();
 
-            {
-                let mut preview_stream = session.fetch(sequence, &query).await?;
+        {
+            let mut preview_stream = session.fetch(sequence, &query).await?;
 
-                while let Some(fetch) = preview_stream.next().await {
-                    let fetch = fetch?;
+            while let Some(fetch) = preview_stream.next().await {
+                let fetch = fetch?;
 
-                    if let Some(headers) = fetch.header() {
-                        let message_id = match fetch.uid {
-                            Some(uid) => uid,
-                            None => err!(
-                                ErrorKind::InvalidMessage,
-                                "The requested message is missing a unique identifier"
-                            ),
-                        };
+                if let Some(headers) = fetch.header() {
+                    let message_id = match fetch.uid {
+                        Some(uid) => uid,
+                        None => err!(
+                            ErrorKind::InvalidMessage,
+                            "The requested message is missing a unique identifier"
+                        ),
+                    };
 
-                        let flags = fetch
-                            .flags()
-                            .into_iter()
-                            .filter_map(|flag| Flag::from_imap(&flag));
+                    let flags = fetch
+                        .flags()
+                        .into_iter()
+                        .filter_map(|flag| Flag::from_imap(&flag));
 
-                        let builder: MessageBuilder = headers.try_into()?;
+                    let builder: MessageBuilder = headers.try_into()?;
 
-                        let preview: Preview = builder.flags(flags).id(message_id).build()?;
+                    let preview: Preview = builder.flags(flags).id(message_id).build()?;
 
-                        previews.push(preview);
-                    }
+                    previews.push(preview);
                 }
             }
-
-            Ok(previews)
-        } else {
-            Ok(Vec::new())
         }
+
+        Ok(previews)
     }
 
     async fn get_message(&mut self, box_id: &str, msg_id: &str) -> Result<Message> {
@@ -545,11 +421,9 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
 
         self.select(box_id).await?;
 
-        let session = self.inner_mut();
-
         let query = QueryBuilder::default().body().build();
 
-        let mut fetch_stream = session.uid_fetch(msg_id, query).await?;
+        let mut fetch_stream = self.session.uid_fetch(msg_id, query).await?;
 
         let mut fetched = Vec::new();
 
@@ -613,7 +487,6 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
 mod tests {
 
     use super::*;
-    use env_logger::Env;
 
     use dotenv::dotenv;
 
@@ -646,11 +519,11 @@ mod tests {
     async fn get_mailbox() {
         let mut session = create_test_session().await;
 
-        let box_name = "INBOX";
+        let box_id = "Education";
 
-        let mailbox_list = session.get_mailbox_list().await.unwrap();
+        let mailbox = session.get_mailbox(box_id).await.unwrap();
 
-        println!("{:?}", mailbox_list.get_box(box_name));
+        println!("{:?}", mailbox);
     }
 
     #[cfg_attr(feature = "runtime-async-std", async_std::test)]
@@ -670,7 +543,7 @@ mod tests {
     #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     #[cfg_attr(feature = "runtime-tokio", tokio::test)]
     async fn get_box_list() {
-        env_logger::Builder::from_env(Env::default().default_filter_or("trace")).init();
+        // env_logger::Builder::from_env(Env::default().default_filter_or("trace")).init();
         let mut session = create_test_session().await;
 
         let box_list = session.get_mailbox_list().await.unwrap();

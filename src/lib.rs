@@ -1,4 +1,3 @@
-mod cache;
 mod runtime;
 
 pub mod client;

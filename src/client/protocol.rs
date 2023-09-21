@@ -8,7 +8,7 @@ use crate::error::Result;
 use super::{
     connection::ConnectionSecurity,
     incoming::types::{
-        mailbox::{MailBox, MailBoxList},
+        mailbox::{Mailbox, MailboxList},
         message::{Message, Preview},
     },
     outgoing::types::message::SendableMessage,
@@ -163,9 +163,9 @@ pub trait IncomingProtocol {
 
     fn should_keep_alive(&self) -> bool;
 
-    async fn get_mailbox_list(&mut self) -> Result<&MailBoxList>;
+    async fn get_mailbox_list(&mut self) -> Result<MailboxList>;
 
-    async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<&MailBox>;
+    async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<Mailbox>;
 
     async fn rename_mailbox(&mut self, old_name: &str, new_name: &str) -> Result<()>;
 

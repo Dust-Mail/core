@@ -26,7 +26,7 @@ use self::constants::{ACTIVITY_TIMEOUT, MAILBOX_DEFAULT_NAME};
 
 use super::types::{
     flag::Flag,
-    mailbox::{MailBox, MailBoxList, MessageCounts},
+    mailbox::{Mailbox, MailboxList, MailboxStats},
     message::{Message, Preview},
 };
 
@@ -104,7 +104,6 @@ impl UniqueIdMap {
 
 pub struct PopSession<S: Read + Write + Unpin> {
     session: async_pop::Client<S>,
-    mailbox_list: MailBoxList,
     unique_id_map: UniqueIdMap,
 }
 
@@ -179,7 +178,7 @@ impl<S: Read + Write + Unpin> PopSession<S> {
     pub fn new(session: async_pop::Client<S>) -> Self {
         Self {
             session,
-            mailbox_list: MailBoxList::default(),
+
             unique_id_map: UniqueIdMap::new(),
         }
     }
@@ -187,14 +186,14 @@ impl<S: Read + Write + Unpin> PopSession<S> {
     /// Fetches the message count from the pop server and creates a new 'fake' mailbox.
     ///
     /// We do this because Pop does not support mailboxes.
-    async fn get_inbox(&mut self) -> Result<MailBox> {
+    async fn get_inbox(&mut self) -> Result<Mailbox> {
         let stats = self.session.stat().await?;
 
         let message_count = stats.counter();
 
-        let counts = MessageCounts::new(0, message_count.value()?);
+        let counts = MailboxStats::new(0, message_count.value()?);
 
-        let mailbox = MailBox::new(
+        let mailbox = Mailbox::new(
             Some(counts),
             None,
             Vec::new(),
@@ -250,25 +249,14 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
         }
     }
 
-    async fn get_mailbox_list(&mut self) -> Result<&MailBoxList> {
+    async fn get_mailbox_list(&mut self) -> Result<MailboxList> {
         let inbox = self.get_inbox().await?;
-        self.mailbox_list = MailBoxList::new(vec![inbox]);
 
-        Ok(&self.mailbox_list)
+        Ok(vec![inbox].into())
     }
 
-    async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<&MailBox> {
-        let mailbox_list = self.get_mailbox_list().await?;
-
-        if let Some(mailbox) = mailbox_list.get_box(mailbox_id) {
-            Ok(mailbox)
-        } else {
-            err!(
-                ErrorKind::MailBoxNotFound,
-                "Could not find a mailbox with id {}",
-                mailbox_id
-            )
-        }
+    async fn get_mailbox(&mut self, _mailbox_id: &str) -> Result<Mailbox> {
+        self.get_inbox().await
     }
 
     async fn logout(&mut self) -> Result<()> {
@@ -303,15 +291,15 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
     async fn get_messages(&mut self, _: &str, start: usize, end: usize) -> Result<Vec<Preview>> {
         let mailbox = self.get_inbox().await?;
 
-        let total_messages = mailbox.counts().unwrap().total();
+        let total_messages = mailbox.stats().unwrap().total();
 
-        let sequence_start = if total_messages < &end {
+        let sequence_start = if total_messages < end {
             1
         } else {
             total_messages.saturating_sub(end).saturating_add(1)
         };
 
-        let sequence_end = if total_messages < &start {
+        let sequence_end = if total_messages < start {
             1
         } else {
             total_messages.saturating_sub(start).saturating_add(1)

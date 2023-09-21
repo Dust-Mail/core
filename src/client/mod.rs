@@ -16,7 +16,7 @@ use self::outgoing::smtp;
 
 use self::{
     incoming::types::{
-        mailbox::{MailBox, MailBoxList},
+        mailbox::{Mailbox, MailboxList},
         message::{Message, Preview},
     },
     outgoing::types::message::SendableMessage,
@@ -66,11 +66,11 @@ impl EmailClient {
         self.incoming.should_keep_alive()
     }
 
-    pub async fn get_mailbox_list(&mut self) -> Result<&MailBoxList> {
+    pub async fn get_mailbox_list(&mut self) -> Result<MailboxList> {
         self.incoming.get_mailbox_list().await
     }
 
-    pub async fn get_mailbox<BoxId: AsRef<str>>(&mut self, mailbox_id: BoxId) -> Result<&MailBox> {
+    pub async fn get_mailbox<BoxId: AsRef<str>>(&mut self, mailbox_id: BoxId) -> Result<Mailbox> {
         self.incoming.get_mailbox(mailbox_id.as_ref()).await
     }
 
@@ -168,10 +168,7 @@ pub async fn create(
         }
     };
 
-    let client = EmailClient {
-        incoming: incoming_protocol,
-        outgoing: outgoing_protocol,
-    };
+    let client = EmailClient::new(incoming_protocol, outgoing_protocol);
 
     Ok(client)
 }
