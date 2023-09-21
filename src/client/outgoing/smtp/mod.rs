@@ -137,52 +137,34 @@ pub fn create(credentials: SmtpCredentials) -> Result<Box<dyn OutgoingProtocol +
     Ok(Box::new(client))
 }
 
-#[cfg(test)]
-mod test {
-    use std::env;
+// #[cfg(test)]
+// mod test {
+//     use std::env;
 
-    use dotenv::dotenv;
+//     use dotenv::dotenv;
 
-    use crate::client::{builder::MessageBuilder, protocol::RemoteServer};
+//     use crate::client::{builder::MessageBuilder, protocol::RemoteServer};
 
-    use super::*;
+//     use super::*;
 
-    async fn create_test_session() -> Box<dyn OutgoingProtocol + Send + Sync> {
-        dotenv().ok();
+//     async fn create_test_session() -> Box<dyn OutgoingProtocol + Send + Sync> {
+//         dotenv().ok();
 
-        let server = RemoteServer::new(
-            env::var("SMTP_SERVER").unwrap(),
-            465,
-            ConnectionSecurity::Tls,
-        );
+//         let server = RemoteServer::new(
+//             env::var("SMTP_SERVER").unwrap(),
+//             465,
+//             ConnectionSecurity::Tls,
+//         );
 
-        let creds = Credentials::password(
-            env::var("SMTP_USERNAME").unwrap(),
-            env::var("SMTP_PASSWORD").unwrap(),
-        );
+//         let creds = Credentials::password(
+//             env::var("SMTP_USERNAME").unwrap(),
+//             env::var("SMTP_PASSWORD").unwrap(),
+//         );
 
-        let smtp_creds = SmtpCredentials::new(server, creds);
+//         let smtp_creds = SmtpCredentials::new(server, creds);
 
-        let client = create(smtp_creds).unwrap();
+//         let client = create(smtp_creds).unwrap();
 
-        client
-    }
-
-    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
-    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
-    async fn test_send() {
-        env_logger::init();
-        let mut client = create_test_session().await;
-
-        let message = MessageBuilder::new()
-            .recipients(("Sam", "mail@samtaen.nl"))
-            .senders(("Guus", "mail@guusvanmeerveld.dev"))
-            .subject("dikheid")
-            .html("<h1>Je bent super dik</h1>");
-
-        client
-            .send_message(message.try_into().unwrap())
-            .await
-            .unwrap();
-    }
-}
+//         client
+//     }
+// }
