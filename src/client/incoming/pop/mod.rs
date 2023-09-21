@@ -416,7 +416,7 @@ mod test {
     async fn get_message() {
         let mut session = create_test_session().await;
 
-        let message = session.get_message("Inbox", "17812").await.unwrap();
+        let message = session.get_message("Inbox", "1").await.unwrap();
 
         println!("{:?}", message.to());
     }

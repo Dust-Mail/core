@@ -5,7 +5,6 @@ use crate::{
     error::{err, Error, ErrorKind},
 };
 
-use email::{Header, MimeMessage};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -13,9 +12,9 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SendableMessage {
     from: Address,
-    to: Vec<Address>,
-    cc: Vec<Address>,
-    bcc: Vec<Address>,
+    to: Address,
+    cc: Option<Address>,
+    bcc: Option<Address>,
     subject: String,
     content: Content,
 }
@@ -30,15 +29,17 @@ impl TryInto<SendableEmail> for SendableMessage {
     fn try_into(self) -> result::Result<SendableEmail, Self::Error> {
         use async_smtp::Envelope;
 
-        let from: async_smtp::EmailAddress = self.from.address().parse().unwrap();
+        let from: Option<async_smtp::EmailAddress> =
+            self.from.first().map(|addr| addr.email().parse().unwrap());
 
         let to: Vec<async_smtp::EmailAddress> = self
             .to
+            .as_list()
             .iter()
-            .filter_map(|to| to.address().parse().ok())
+            .filter_map(|to| to.email().parse().ok())
             .collect();
 
-        let envelope = match Envelope::new(Some(from), to) {
+        let envelope = match Envelope::new(from, to) {
             Ok(envelope) => envelope,
             Err(err) => err!(
                 ErrorKind::InvalidMessage,
@@ -47,116 +48,64 @@ impl TryInto<SendableEmail> for SendableMessage {
             ),
         };
 
-        let message: MimeMessage = self.try_into()?;
+        let message: String = self.try_into()?;
 
-        let email = SendableEmail::new(envelope, message.as_string());
+        let email = SendableEmail::new(envelope, message);
 
         Ok(email)
     }
 }
 
-impl TryInto<MimeMessage> for SendableMessage {
+impl TryInto<String> for SendableMessage {
     type Error = Error;
 
-    fn try_into(self) -> result::Result<MimeMessage, Self::Error> {
-        let mut parts = Vec::new();
+    fn try_into(self) -> result::Result<String, Self::Error> {
+        let mut builder = mail_builder::MessageBuilder::new()
+            .from(self.from)
+            .to(self.to)
+            .subject(self.subject);
 
-        if let Some(html) = self.content.html {
-            let mut html_content = MimeMessage::new(html);
+        if let Some(cc) = self.cc {
+            builder = builder.cc(cc);
+        }
 
-            html_content.headers.insert(Header::new_with_value(
-                String::from("Content-Type"),
-                "text/html",
-            )?);
-
-            html_content.update_headers();
-
-            parts.push(html_content)
+        if let Some(bcc) = self.bcc {
+            builder = builder.bcc(bcc);
         }
 
         if let Some(text) = self.content.text {
-            let mut text_content = MimeMessage::new(text);
-
-            text_content.headers.insert(Header::new_with_value(
-                String::from("Content-Type"),
-                "text/plain",
-            )?);
-
-            text_content.update_headers();
-
-            parts.push(text_content)
+            builder = builder.text_body(text);
         }
 
-        let mut message = MimeMessage::new_blank_message();
-
-        for part in parts.into_iter() {
-            message.children.push(part);
+        if let Some(html) = self.content.html {
+            builder = builder.html_body(html);
         }
 
-        if self.to.len() > 0 {
-            message.headers.insert(Header::new_with_value(
-                String::from("To"),
-                self.to
-                    .into_iter()
-                    .map(|addr| addr.into())
-                    .collect::<Vec<email::Address>>(),
-            )?);
-        }
-
-        if self.cc.len() > 0 {
-            message.headers.insert(Header::new_with_value(
-                String::from("CC"),
-                self.cc
-                    .into_iter()
-                    .map(|addr| addr.into())
-                    .collect::<Vec<email::Address>>(),
-            )?);
-        }
-
-        if self.bcc.len() > 0 {
-            message.headers.insert(Header::new_with_value(
-                String::from("BCC"),
-                self.bcc
-                    .into_iter()
-                    .map(|addr| addr.into())
-                    .collect::<Vec<email::Address>>(),
-            )?);
-        }
-
-        message.headers.insert(Header::new_with_value(
-            String::from("From"),
-            vec![self.from.into()],
-        )?);
-
-        message.headers.insert(Header::new_with_value(
-            String::from("Subject"),
-            self.subject,
-        )?);
-
-        message.headers.insert(Header::new_with_value(
-            String::from("Content-Type"),
-            format!("multipart/alternative; boundary=\"{}\"", message.boundary),
-        )?);
-
-        message.update_headers();
-
-        Ok(message)
+        Ok(builder.write_to_string()?)
     }
 }
 
 impl TryFrom<MessageBuilder> for SendableMessage {
     type Error = Error;
 
-    fn try_from(mut builder: MessageBuilder) -> result::Result<Self, Self::Error> {
-        let from = if builder.from.is_empty() {
-            err!(ErrorKind::InvalidMessage, "Missing message sender")
-        } else {
-            builder.from.swap_remove(0)
+    fn try_from(builder: MessageBuilder) -> result::Result<Self, Self::Error> {
+        let from = match builder.from {
+            Some(from) => from,
+            None => {
+                err!(ErrorKind::InvalidMessage, "Missing message sender");
+            }
+        };
+
+        let to = match builder.to {
+            Some(to) => to,
+            None => {
+                err!(ErrorKind::InvalidMessage, "Missing message receiver");
+            }
         };
 
         let sendable = Self {
             from,
-            to: builder.to,
+            to,
             bcc: builder.bcc,
             cc: builder.cc,
             content: builder.content,
@@ -174,8 +123,8 @@ mod test {
     #[test]
     fn test_to_mime() {
         let builder = MessageBuilder::new()
-            .recipients(vec![("Tester", "test@example.com")])
-            .senders(vec![("User", "user@example.com")])
+            .recipients(("Tester", "test@example.com"))
+            .senders(("User", "user@example.com"))
             .subject("Test email")
             .text("Hello world!")
             .html(
@@ -183,8 +132,8 @@ mod test {
             );
 
         let sendable: SendableMessage = builder.build().unwrap();
-        let mime_message: MimeMessage = sendable.try_into().unwrap();
+        let message_str: String = sendable.try_into().unwrap();
 
-        println!("{}", mime_message.as_string())
+        println!("{}", message_str)
     }
 }

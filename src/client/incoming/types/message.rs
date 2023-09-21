@@ -13,7 +13,7 @@ use super::flag::Flag;
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Preview {
-    from: Vec<Address>,
+    from: Address,
     flags: Vec<Flag>,
     id: String,
     sent: Option<i64>,
@@ -22,7 +22,7 @@ pub struct Preview {
 
 impl Preview {
     /// The sender(s) of the message.
-    pub fn from(&self) -> &Vec<Address> {
+    pub fn from(&self) -> &Address {
         &self.from
     }
 
@@ -64,9 +64,14 @@ impl TryFrom<MessageBuilder> for Preview {
             None => err!(ErrorKind::InvalidMessage, "Message is missing identifier"),
         };
 
+        let from = match builder.from {
+            Some(from) => from,
+            None => err!(ErrorKind::InvalidMessage, "Message is missing sender"),
+        };
+
         let preview = Preview {
             flags: builder.flags,
-            from: builder.from,
+            from,
             id,
             sent: builder.sent,
             subject: builder.subject,
@@ -79,10 +84,10 @@ impl TryFrom<MessageBuilder> for Preview {
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Message {
-    from: Vec<Address>,
-    to: Vec<Address>,
-    cc: Vec<Address>,
-    bcc: Vec<Address>,
+    from: Address,
+    to: Address,
+    cc: Option<Address>,
+    bcc: Option<Address>,
     headers: Headers,
     flags: Vec<Flag>,
     id: String,
@@ -97,13 +102,23 @@ impl TryFrom<MessageBuilder> for Message {
     fn try_from(builder: MessageBuilder) -> result::Result<Self, Self::Error> {
         let id = match builder.id {
             Some(id) => id,
-            None => err!(ErrorKind::InvalidMessage, "Message is missing identifier"),
+            None => err!(ErrorKind::InvalidMessage, "Missing message identifier"),
+        };
+
+        let from = match builder.from {
+            Some(from) => from,
+            None => err!(ErrorKind::InvalidMessage, "Missing message sender"),
+        };
+
+        let to = match builder.to {
+            Some(to) => to,
+            None => err!(ErrorKind::InvalidMessage, "Missing message receiver"),
         };
 
         let message = Message {
             flags: builder.flags,
-            to: builder.to,
-            from: builder.from,
+            to,
+            from,
             bcc: builder.bcc,
             cc: builder.cc,
             id,
@@ -118,22 +133,6 @@ impl TryFrom<MessageBuilder> for Message {
 }
 
 impl Message {
-    pub fn from(&self) -> &Vec<Address> {
-        &self.from
-    }
-
-    pub fn to(&self) -> &Vec<Address> {
-        &self.to
-    }
-
-    pub fn cc(&self) -> &Vec<Address> {
-        &self.cc
-    }
-
-    pub fn bcc(&self) -> &Vec<Address> {
-        &self.bcc
-    }
-
     /// The message's RFC 822 headers.
     pub fn headers(&self) -> &Headers {
         &self.headers
@@ -170,5 +169,13 @@ impl Message {
     #[cfg(feature = "json")]
     pub fn to_json(&self) -> Result<String> {
         parse::json::to_json(self)
+    }
+
+    pub fn from(&self) -> &Address {
+        &self.from
+    }
+
+    pub fn to(&self) -> &Address {
+        &self.to
     }
 }

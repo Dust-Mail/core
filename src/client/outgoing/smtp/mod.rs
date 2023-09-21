@@ -174,14 +174,11 @@ mod test {
         env_logger::init();
         let mut client = create_test_session().await;
 
-        let to = ("Sam", "mail@samtaen.nl");
-        let from = ("Guus", "mail@guusvanmeerveld.dev");
-
         let message = MessageBuilder::new()
-            .recipients(vec![to])
-            .senders(vec![from])
-            .subject("Test email")
-            .text("This is sent from dust mail!");
+            .recipients(("Sam", "mail@samtaen.nl"))
+            .senders(("Guus", "mail@guusvanmeerveld.dev"))
+            .subject("dikheid")
+            .html("<h1>Je bent super dik</h1>");
 
         client
             .send_message(message.try_into().unwrap())

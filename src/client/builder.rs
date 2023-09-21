@@ -1,14 +1,15 @@
-use std::{fmt::Display, result};
+use std::{collections::HashMap, fmt::Display, result};
 
 use crate::error::{err, Error, ErrorKind, Result};
 
 use super::{address::Address, content::Content, incoming::types::flag::Flag, parser, Headers};
 
+#[derive(Debug)]
 pub struct MessageBuilder {
-    pub(crate) from: Vec<Address>,
-    pub(crate) to: Vec<Address>,
-    pub(crate) cc: Vec<Address>,
-    pub(crate) bcc: Vec<Address>,
+    pub(crate) from: Option<Address>,
+    pub(crate) to: Option<Address>,
+    pub(crate) cc: Option<Address>,
+    pub(crate) bcc: Option<Address>,
     pub(crate) flags: Vec<Flag>,
     pub(crate) id: Option<String>,
     pub(crate) sent: Option<i64>,
@@ -28,11 +29,11 @@ impl TryFrom<&[u8]> for MessageBuilder {
 impl MessageBuilder {
     pub fn new() -> Self {
         Self {
-            from: Vec::new(),
             flags: Vec::new(),
-            bcc: Vec::new(),
-            cc: Vec::new(),
-            to: Vec::new(),
+            from: None,
+            bcc: None,
+            cc: None,
+            to: None,
             id: None,
             sent: None,
             subject: None,
@@ -51,42 +52,26 @@ impl MessageBuilder {
         self
     }
 
-    pub fn senders<C: IntoIterator<Item = impl Into<Address>>>(mut self, sender: C) -> Self {
-        let mut iter = sender.into_iter();
-
-        while let Some(address) = iter.next() {
-            self.from.push(address.into())
-        }
+    pub fn senders<C: Into<Address>>(mut self, sender: C) -> Self {
+        self.from = Some(sender.into());
 
         self
     }
 
-    pub fn recipients<C: IntoIterator<Item = impl Into<Address>>>(mut self, recipient: C) -> Self {
-        let mut iter = recipient.into_iter();
-
-        while let Some(address) = iter.next() {
-            self.to.push(address.into())
-        }
+    pub fn recipients<C: Into<Address>>(mut self, recipient: C) -> Self {
+        self.to = Some(recipient.into());
 
         self
     }
 
-    pub fn cc<C: IntoIterator<Item = Address>>(mut self, cc: C) -> Self {
-        let mut iter = cc.into_iter();
-
-        while let Some(address) = iter.next() {
-            self.cc.push(address)
-        }
+    pub fn cc<C: Into<Address>>(mut self, cc: C) -> Self {
+        self.cc = Some(cc.into());
 
         self
     }
 
-    pub fn bcc<C: IntoIterator<Item = impl Into<Address>>>(mut self, bcc: C) -> Self {
-        let mut iter = bcc.into_iter();
-
-        while let Some(address) = iter.next() {
-            self.bcc.push(address.into())
-        }
+    pub fn bcc<C: Into<Address>>(mut self, bcc: C) -> Self {
+        self.bcc = Some(bcc.into());
 
         self
     }
@@ -111,6 +96,18 @@ impl MessageBuilder {
 
     pub fn headers(mut self, headers: Headers) -> Self {
         self.headers = Some(headers);
+
+        self
+    }
+
+    pub fn header<H: Into<String>, V: Display>(mut self, header: H, value: V) -> Self {
+        if let None = self.headers {
+            self.headers = Some(HashMap::new());
+        }
+
+        if let Some(headers) = self.headers.as_mut() {
+            headers.insert(header.into(), value.to_string());
+        }
 
         self
     }

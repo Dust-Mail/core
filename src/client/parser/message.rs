@@ -92,12 +92,23 @@ pub fn from_rfc822<B: AsRef<[u8]>>(bytes: B) -> Result<MessageBuilder> {
         None => Vec::new(),
     };
 
-    let mut message_builder = MessageBuilder::new()
-        .headers(headers)
-        .senders(from)
-        .recipients(to)
-        .cc(cc)
-        .bcc(bcc);
+    let mut message_builder = MessageBuilder::new().headers(headers);
+
+    if from.len() > 0 {
+        message_builder = message_builder.senders(from);
+    }
+
+    if to.len() > 0 {
+        message_builder = message_builder.recipients(to);
+    }
+
+    if cc.len() > 0 {
+        message_builder = message_builder.cc(cc);
+    }
+
+    if bcc.len() > 0 {
+        message_builder = message_builder.bcc(bcc);
+    }
 
     if let Some(html) = content.html {
         message_builder = message_builder.html(html)
