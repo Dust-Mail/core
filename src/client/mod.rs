@@ -37,6 +37,10 @@ pub mod address;
 pub mod builder;
 pub mod connection;
 pub mod content;
+
+#[cfg(feature = "maildir")]
+mod maildir;
+
 mod parser;
 
 mod protocol;
@@ -138,7 +142,9 @@ pub async fn create(
 ) -> Result<EmailClient> {
     let incoming_protocol = match incoming {
         #[cfg(feature = "imap")]
-        IncomingEmailProtocol::Imap(credentials) => imap::create(&credentials).await?,
+        IncomingEmailProtocol::Imap(credentials) => {
+            imap::create(&credentials, Default::default()).await?
+        }
 
         #[cfg(feature = "pop")]
         IncomingEmailProtocol::Pop(credentials) => pop::create(&credentials).await?,

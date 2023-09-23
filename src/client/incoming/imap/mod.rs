@@ -4,11 +4,14 @@ mod query;
 // use std::collections::HashMap;
 use std::fmt::Debug;
 
+#[cfg(feature = "maildir")]
+use crate::client::maildir::MailDirectory;
+
 use crate::{
     client::{
         builder::MessageBuilder,
         connection::ConnectionSecurity,
-        protocol::{ImapCredentials, IncomingProtocol},
+        protocol::{ImapCredentials, IncomingConfig, IncomingProtocol},
         Credentials, ServerCredentials,
     },
     error::{err, Error, ErrorKind, Result},
@@ -41,9 +44,11 @@ pub struct ImapClient<S: Read + Write + Unpin + Debug + Send> {
 
 pub struct ImapSession<S: Write + Read + Unpin + Debug + Send + Sync> {
     session: async_imap::Session<S>,
-    /// The currently selected box' id and its stats.
+    /// The currently selected box
     selected_box: Option<(String, MailboxStats)>,
     last_keep_alive: Option<Instant>,
+    #[cfg(feature = "maildir")]
+    maildir: Option<MailDirectory>,
 }
 
 pub async fn connect<S: AsRef<str>, P: Into<u16>>(
@@ -93,13 +98,23 @@ async fn create_session<S: Read + Write + Unpin + Debug + Send + Sync>(
 /// Creates a new imap client from a given set of credentials
 pub async fn create(
     credentials: &ImapCredentials,
+    config: IncomingConfig,
 ) -> Result<Box<dyn IncomingProtocol + Sync + Send>> {
+    #[cfg(feature = "maildir")]
+    let maildir = match config.maildir {
+        Some(path) => Some(MailDirectory::open(path)?),
+        None => None,
+    };
+
     match credentials.server().security() {
         ConnectionSecurity::Tls => {
             let imap_client =
                 connect(credentials.server().domain(), credentials.server().port()).await?;
 
-            let session = create_session(imap_client, &credentials.credentials()).await?;
+            let mut session = create_session(imap_client, &credentials.credentials()).await?;
+
+            #[cfg(feature = "maildir")]
+            session.maildir(maildir);
 
             Ok(Box::new(session))
         }
@@ -107,7 +122,10 @@ pub async fn create(
             let imap_client =
                 connect_plain(credentials.server().domain(), credentials.server().port()).await?;
 
-            let session = create_session(imap_client, &credentials.credentials()).await?;
+            let mut session = create_session(imap_client, &credentials.credentials()).await?;
+
+            #[cfg(feature = "maildir")]
+            session.maildir(maildir);
 
             Ok(Box::new(session))
         }
@@ -118,6 +136,8 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapClient<S> {
     fn new_imap_session(session: async_imap::Session<S>) -> ImapSession<S> {
         ImapSession {
             session,
+            #[cfg(feature = "maildir")]
+            maildir: None,
             selected_box: None,
             last_keep_alive: None,
         }
@@ -159,27 +179,39 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapClient<S> {
 }
 
 impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapSession<S> {
-    pub fn inner_mut(&mut self) -> &mut async_imap::Session<S> {
-        &mut self.session
+    #[cfg(feature = "maildir")]
+    pub fn maildir(&mut self, maildir: Option<MailDirectory>) {
+        self.maildir = maildir;
+    }
+
+    async fn list(
+        &mut self,
+        reference: Option<&str>,
+        pattern: Option<&str>,
+    ) -> Result<MailboxList> {
+        let mut mailboxes: Vec<Mailbox> = Vec::new();
+
+        self.close().await?;
+
+        {
+            let mut mailbox_stream = self.session.list(reference, pattern).await?;
+
+            while let Some(mailbox) = mailbox_stream.next().await {
+                mailboxes.push(mailbox?.into());
+            }
+        }
+
+        Ok(mailboxes.into())
     }
 
     /// This function will check if a box with a given box id is actually selectable, throwing an error if it is not.
-    async fn check_selectable(&mut self, box_id: &str) -> Result<()> {
-        let box_list = self.get_mailbox_list().await?;
-
-        let requested_box = box_list.get_box(box_id);
-
-        match requested_box {
-            Some(mailbox) => {
-                if !mailbox.selectable() {
-                    err!(
-                        ErrorKind::MailServer,
-                        "The mailbox with id '{}' is not selectable",
-                        box_id,
-                    );
-                }
-            }
-            None => {}
+    fn check_selectable(&mut self, mailbox: &Mailbox) -> Result<()> {
+        if !mailbox.selectable() {
+            err!(
+                ErrorKind::MailServer,
+                "The mailbox with id '{}' is not selectable",
+                mailbox.id(),
+            );
         }
 
         Ok(())
@@ -196,8 +228,8 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapSession<S> {
     }
 
     /// Select a given box if it hasn't already been selected, otherwise return the already selected box.
-    async fn select<I: Into<String>>(&mut self, box_id: I) -> Result<&MailboxStats> {
-        let box_id = box_id.into();
+    async fn select(&mut self, mailbox: &Mailbox) -> Result<&MailboxStats> {
+        let box_id = mailbox.id().to_string();
 
         // If there is no box selected yet or the box we have selected is not the box we want to select, we have to request the server.
         if !self.selected_box.is_some() || self.selected_box.as_ref().unwrap().0 != box_id {
@@ -205,6 +237,8 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapSession<S> {
 
             // If there is already a box selected we must close it first
             self.close().await?;
+
+            self.check_selectable(mailbox)?;
 
             let imap_stats = self.session.select(&box_id).await?;
 
@@ -241,42 +275,20 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
     }
 
     async fn get_mailbox_list(&mut self) -> Result<MailboxList> {
-        let mut mailboxes: Vec<Mailbox> = Vec::new();
-
-        self.close().await?;
-
-        {
-            let mut mailbox_stream = self.session.list(None, Some("*")).await?;
-
-            while let Some(mailbox) = mailbox_stream.next().await {
-                mailboxes.push(mailbox?.into());
-            }
-        }
-
-        Ok(mailboxes.into())
+        self.list(None, Some("*")).await
     }
 
     async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<Mailbox> {
-        let stats = self.select(mailbox_id).await?.clone();
+        let list = self.list(Some(mailbox_id), Some("*")).await?;
 
-        let mut mailboxes: Vec<Mailbox> = Vec::new();
-
-        {
-            let mut mailbox_stream = self.session.list(Some(mailbox_id), Some("*")).await?;
-
-            while let Some(mailbox) = mailbox_stream.next().await {
-                mailboxes.push(mailbox?.into());
-            }
-        }
-
-        let tree: MailboxList = mailboxes.into();
-
-        match tree
+        match list
             .to_vec()
             .into_iter()
             .find(|mailbox| mailbox.id() == mailbox_id)
         {
             Some(mut mailbox) => {
+                let stats = self.select(&mailbox).await?.clone();
+
                 mailbox.add_stats(stats);
 
                 Ok(mailbox)
@@ -297,9 +309,7 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
     }
 
     async fn delete_mailbox(&mut self, box_id: &str) -> Result<()> {
-        let session = self.inner_mut();
-
-        session.delete(box_id).await?;
+        self.session.delete(box_id).await?;
 
         Ok(())
     }
@@ -329,19 +339,15 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
             None => new_name.to_string(),
         };
 
-        let session = self.inner_mut();
+        self.close().await?;
 
-        session.close().await?;
-
-        session.rename(box_id, &new_name).await?;
+        self.session.rename(box_id, &new_name).await?;
 
         Ok(())
     }
 
     async fn create_mailbox(&mut self, box_id: &str) -> Result<()> {
-        let session = self.inner_mut();
-
-        session.create(box_id).await?;
+        self.session.create(box_id).await?;
 
         Ok(())
     }
@@ -352,9 +358,9 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
         start: usize,
         end: usize,
     ) -> Result<Vec<Preview>> {
-        self.check_selectable(box_id).await?;
+        let mailbox = self.get_mailbox(box_id).await?;
 
-        let stats = self.select(box_id).await?;
+        let stats = self.select(&mailbox).await?;
 
         let total_messages = stats.total();
 
@@ -376,8 +382,6 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
 
         let sequence = format!("{}:{}", sequence_start, sequence_end);
 
-        let session = self.inner_mut();
-
         let mut previews = Vec::new();
 
         let query = QueryBuilder::default()
@@ -385,7 +389,7 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
             .build();
 
         {
-            let mut preview_stream = session.fetch(sequence, &query).await?;
+            let mut preview_stream = self.session.fetch(sequence, &query).await?;
 
             while let Some(fetch) = preview_stream.next().await {
                 let fetch = fetch?;
@@ -417,9 +421,16 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
     }
 
     async fn get_message(&mut self, box_id: &str, msg_id: &str) -> Result<Message> {
-        self.check_selectable(box_id).await?;
+        #[cfg(feature = "maildir")]
+        if let Some(maildir) = self.maildir.as_ref() {
+            if let Ok(builder) = maildir.retr(msg_id) {
+                return Ok(builder.id(msg_id).build()?);
+            }
+        }
 
-        self.select(box_id).await?;
+        let mailbox = self.get_mailbox(box_id).await?;
+
+        self.select(&mailbox).await?;
 
         let query = QueryBuilder::default().body().build();
 
@@ -467,6 +478,11 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
 
         match fetch.body() {
             Some(body) => {
+                #[cfg(feature = "maildir")]
+                if let Some(maildir) = self.maildir.as_mut() {
+                    maildir.store(&message_id, body)?;
+                }
+
                 let builder: MessageBuilder = body.try_into()?;
 
                 let message: Message = builder.flags(flags).id(message_id).build()?;
@@ -486,13 +502,15 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
 #[cfg(test)]
 mod tests {
 
+    use crate::client::protocol::RemoteServer;
+
     use super::*;
 
     use dotenv::dotenv;
 
     use std::env;
 
-    async fn create_test_session() -> ImapSession<TlsStream<TcpStream>> {
+    async fn create_test_session() -> Box<dyn IncomingProtocol> {
         dotenv().ok();
 
         let username = env::var("IMAP_USERNAME").unwrap();
@@ -501,9 +519,12 @@ mod tests {
         let server = env::var("IMAP_SERVER").unwrap();
         let port: u16 = 993;
 
-        let client = super::connect(server, port).await.unwrap();
+        let server = RemoteServer::new(server, port, ConnectionSecurity::Tls);
+        let credentials = Credentials::password(username, password);
 
-        let session = client.login(&username, &password).await.unwrap();
+        let creds = ImapCredentials::new(server, credentials);
+
+        let session = create(&creds, Default::default()).await.unwrap();
 
         session
     }
@@ -556,7 +577,7 @@ mod tests {
     async fn get_message() {
         let mut session = create_test_session().await;
 
-        let msg_id = "1658";
+        let msg_id = "1707";
         let box_id = "INBOX";
 
         let message = session.get_message(box_id, msg_id).await.unwrap();

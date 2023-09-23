@@ -18,6 +18,39 @@ pub struct MessageBuilder {
     pub(crate) content: Content,
 }
 
+#[cfg(feature = "maildir")]
+impl TryFrom<maildir::MailEntry> for MessageBuilder {
+    type Error = Error;
+
+    fn try_from(mut mail_entry: maildir::MailEntry) -> result::Result<Self, Self::Error> {
+        let parsed = mail_entry.parsed()?;
+
+        let mut builder = parser::message::from_parsed_mail(parsed)?;
+
+        if mail_entry.is_seen() {
+            builder = builder.flag(Flag::Read);
+        }
+
+        if mail_entry.is_flagged() {
+            builder = builder.flag(Flag::Flagged);
+        }
+
+        if mail_entry.is_draft() {
+            builder = builder.flag(Flag::Draft);
+        }
+
+        if mail_entry.is_trashed() {
+            builder = builder.flag(Flag::Deleted);
+        }
+
+        if mail_entry.is_replied() {
+            builder = builder.flag(Flag::Answered);
+        }
+
+        Ok(builder)
+    }
+}
+
 impl TryFrom<&[u8]> for MessageBuilder {
     type Error = Error;
 
@@ -48,6 +81,12 @@ impl MessageBuilder {
         while let Some(flag) = iter.next() {
             self.flags.push(flag)
         }
+
+        self
+    }
+
+    pub fn flag(mut self, flag: Flag) -> Self {
+        self.flags.push(flag);
 
         self
     }

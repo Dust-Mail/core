@@ -54,6 +54,15 @@ pub enum Credentials {
 }
 
 impl Credentials {
+    pub fn username(&self) -> &str {
+        match &self {
+            Credentials::OAuth { username, .. } => username,
+            Credentials::Password { username, .. } => username,
+        }
+    }
+}
+
+impl Credentials {
     pub fn password<U: Into<String>, P: Into<String>>(username: U, password: P) -> Self {
         Credentials::Password {
             username: username.into(),
@@ -203,4 +212,42 @@ pub enum IncomingEmailProtocol {
 pub enum OutgoingEmailProtocol {
     #[cfg(feature = "smtp")]
     Smtp(SmtpCredentials),
+}
+
+pub struct IncomingConfig {
+    #[cfg(feature = "maildir")]
+    pub(crate) maildir: Option<String>,
+}
+
+impl Default for IncomingConfig {
+    fn default() -> Self {
+        let mut config = Self::new();
+
+        #[cfg(feature = "maildir")]
+        {
+            use directories::BaseDirs;
+
+            if let Some(dirs) = BaseDirs::new() {
+                config = config.maildir(dirs.cache_dir().join("mail").display());
+            }
+        }
+
+        config
+    }
+}
+
+impl IncomingConfig {
+    pub fn new() -> Self {
+        Self {
+            #[cfg(feature = "maildir")]
+            maildir: None,
+        }
+    }
+
+    #[cfg(feature = "maildir")]
+    pub fn maildir<P: std::fmt::Display>(mut self, path: P) -> Self {
+        self.maildir = Some(path.to_string());
+
+        self
+    }
 }

@@ -60,6 +60,12 @@ pub enum ErrorKind {
     #[cfg(feature = "smtp")]
     Smtp(SmtpError),
     Tls(TlsError),
+    #[cfg(feature = "maildir")]
+    Maildir(maildir::MaildirError),
+    #[cfg(feature = "maildir")]
+    MailEntry(maildir::MailEntryError),
+    #[cfg(feature = "maildir")]
+    Db(sled::Error),
     /// Failed to parse a date/time from the server.
     ParseTime(ParseTimeError),
     ParseInt(ParseIntError),
@@ -154,6 +160,24 @@ impl_from_error!(
     ParseIntError,
     |err| ErrorKind::ParseInt(err),
     "Failed to parse integer value from string"
+);
+#[cfg(feature = "maildir")]
+impl_from_error!(
+    maildir::MaildirError,
+    |err| ErrorKind::Maildir(err),
+    "Failed to store email in local directory"
+);
+#[cfg(feature = "maildir")]
+impl_from_error!(
+    maildir::MailEntryError,
+    |err| ErrorKind::MailEntry(err),
+    "Failed to retrieve email from local directory"
+);
+#[cfg(feature = "maildir")]
+impl_from_error!(
+    sled::Error,
+    |err| ErrorKind::Db(err),
+    "Failed to interact with sled database"
 );
 
 impl fmt::Display for Error {
