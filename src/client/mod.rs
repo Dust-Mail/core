@@ -20,7 +20,7 @@ use self::{
         mailbox::Mailbox,
         message::{Message, Preview},
     },
-    outgoing::types::message::SendableMessage,
+    outgoing::types::sendable::SendableMessage,
     protocol::{IncomingProtocol, OutgoingProtocol},
 };
 
@@ -34,13 +34,13 @@ use crate::error::Result;
 mod incoming;
 mod outgoing;
 
+pub use incoming::types::*;
+pub use outgoing::types::*;
+
 pub mod address;
 pub mod builder;
 pub mod connection;
 pub mod content;
-
-#[cfg(feature = "maildir")]
-mod maildir;
 
 mod parser;
 

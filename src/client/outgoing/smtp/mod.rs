@@ -15,7 +15,7 @@ use async_native_tls::{TlsConnector, TlsStream};
 use async_smtp::{self, authentication::Mechanism, SmtpTransport};
 use async_trait::async_trait;
 
-use super::types::message::SendableMessage;
+use super::types::sendable::SendableMessage;
 
 pub struct SmtpClient {
     credentials: SmtpCredentials,

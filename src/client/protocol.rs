@@ -11,7 +11,7 @@ use super::{
         mailbox::Mailbox,
         message::{Message, Preview},
     },
-    outgoing::types::message::SendableMessage,
+    outgoing::types::sendable::SendableMessage,
 };
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -168,9 +168,13 @@ impl ServerCredentials for PopCredentials {
 
 #[async_trait]
 pub trait IncomingProtocol {
-    async fn send_keep_alive(&mut self) -> Result<()>;
+    async fn send_keep_alive(&mut self) -> Result<()> {
+        Ok(())
+    }
 
-    fn should_keep_alive(&self) -> bool;
+    fn should_keep_alive(&self) -> bool {
+        false
+    }
 
     async fn get_mailbox_list(&mut self) -> Result<Node<Mailbox>>;
 
