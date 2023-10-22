@@ -5,9 +5,6 @@ mod utils;
 // use std::collections::HashMap;
 use std::fmt::Debug;
 
-#[cfg(feature = "maildir")]
-use crate::client::maildir::MailDirectory;
-
 use crate::{
     client::{
         builder::MessageBuilder,
@@ -49,8 +46,6 @@ pub struct ImapSession<S: Write + Read + Unpin + Debug + Send + Sync> {
     /// The currently selected box
     selected_box: Option<(String, MailboxStats)>,
     last_keep_alive: Option<Instant>,
-    #[cfg(feature = "maildir")]
-    maildir: Option<MailDirectory>,
 }
 
 pub async fn connect<S: AsRef<str>, P: Into<u16>>(
@@ -100,23 +95,14 @@ async fn create_session<S: Read + Write + Unpin + Debug + Send + Sync>(
 /// Creates a new imap client from a given set of credentials
 pub async fn create(
     credentials: &ImapCredentials,
-    config: IncomingConfig,
+    _config: IncomingConfig,
 ) -> Result<Box<dyn IncomingProtocol + Sync + Send>> {
-    #[cfg(feature = "maildir")]
-    let maildir = match config.maildir {
-        Some(path) => Some(MailDirectory::open(path)?),
-        None => None,
-    };
-
     match credentials.server().security() {
         ConnectionSecurity::Tls => {
             let imap_client =
                 connect(credentials.server().domain(), credentials.server().port()).await?;
 
-            let mut session = create_session(imap_client, &credentials.credentials()).await?;
-
-            #[cfg(feature = "maildir")]
-            session.maildir(maildir);
+            let session = create_session(imap_client, &credentials.credentials()).await?;
 
             Ok(Box::new(session))
         }
@@ -124,10 +110,7 @@ pub async fn create(
             let imap_client =
                 connect_plain(credentials.server().domain(), credentials.server().port()).await?;
 
-            let mut session = create_session(imap_client, &credentials.credentials()).await?;
-
-            #[cfg(feature = "maildir")]
-            session.maildir(maildir);
+            let session = create_session(imap_client, &credentials.credentials()).await?;
 
             Ok(Box::new(session))
         }
@@ -138,8 +121,6 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapClient<S> {
     fn new_imap_session(session: async_imap::Session<S>) -> ImapSession<S> {
         ImapSession {
             session,
-            #[cfg(feature = "maildir")]
-            maildir: None,
             selected_box: None,
             last_keep_alive: None,
         }
@@ -181,11 +162,6 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapClient<S> {
 }
 
 impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapSession<S> {
-    #[cfg(feature = "maildir")]
-    pub fn maildir(&mut self, maildir: Option<MailDirectory>) {
-        self.maildir = maildir;
-    }
-
     async fn list(
         &mut self,
         reference: Option<&str>,
@@ -446,13 +422,6 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
     }
 
     async fn get_message(&mut self, box_id: &str, msg_id: &str) -> Result<Message> {
-        #[cfg(feature = "maildir")]
-        if let Some(maildir) = self.maildir.as_ref() {
-            if let Ok(builder) = maildir.retr(msg_id) {
-                return Ok(builder.id(msg_id).build()?);
-            }
-        }
-
         let mailbox = self.get_mailbox_no_children(box_id).await?;
 
         self.select(&mailbox).await?;
@@ -503,11 +472,6 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
 
         match fetch.body() {
             Some(body) => {
-                #[cfg(feature = "maildir")]
-                if let Some(maildir) = self.maildir.as_mut() {
-                    maildir.store(&message_id, body)?;
-                }
-
                 let builder: MessageBuilder = body.try_into()?;
 
                 let message: Message = builder.flags(flags).id(message_id).build()?;

@@ -1,6 +1,6 @@
 [package]
 name = "dust-mail"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 
 rust-version = "1.67"
@@ -58,16 +58,14 @@ log = "0.4"
 validator = "0.16.1"
 directories = "5.0.1"
 
-sled = { version = "0.34.7", optional = true }
-
 [dev-dependencies]
 env_logger = "0.10.0"
 dotenv = "0.15.0"
 
 [features]
-default = ["pop", "imap", "smtp", "discover", "runtime-tokio", "serde"]
+default = ["pop", "imap", "smtp", "discover", "runtime-tokio", "serde", "maildir"]
 
-maildir = ["dep:maildir", "dep:sled"]
+maildir = ["dep:maildir"]
 
 discover = ["autoconfig", "autodiscover", "dep:dns-mail-discover"]
 autoconfig = ["dep:autoconfig"]
