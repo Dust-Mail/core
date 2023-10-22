@@ -3,6 +3,7 @@ use std::{collections::HashMap, fmt::Display, sync::Arc};
 use crate::{
     error::{Error, ErrorKind},
     runtime::thread::RwLock,
+    tree::Node,
 };
 
 #[cfg(feature = "imap")]
@@ -16,7 +17,7 @@ use self::outgoing::smtp;
 
 use self::{
     incoming::types::{
-        mailbox::{Mailbox, MailboxList},
+        mailbox::Mailbox,
         message::{Message, Preview},
     },
     outgoing::types::message::SendableMessage,
@@ -70,11 +71,14 @@ impl EmailClient {
         self.incoming.should_keep_alive()
     }
 
-    pub async fn get_mailbox_list(&mut self) -> Result<MailboxList> {
+    pub async fn get_mailbox_list(&mut self) -> Result<Node<Mailbox>> {
         self.incoming.get_mailbox_list().await
     }
 
-    pub async fn get_mailbox<BoxId: AsRef<str>>(&mut self, mailbox_id: BoxId) -> Result<Mailbox> {
+    pub async fn get_mailbox<BoxId: AsRef<str>>(
+        &mut self,
+        mailbox_id: BoxId,
+    ) -> Result<Node<Mailbox>> {
         self.incoming.get_mailbox(mailbox_id.as_ref()).await
     }
 

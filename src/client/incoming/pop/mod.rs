@@ -20,13 +20,14 @@ use crate::{
         io::{Read, Write},
         net::TcpStream,
     },
+    tree::Node,
 };
 
-use self::constants::{ACTIVITY_TIMEOUT, MAILBOX_DEFAULT_NAME};
+use self::constants::ACTIVITY_TIMEOUT;
 
 use super::types::{
     flag::Flag,
-    mailbox::{Mailbox, MailboxList, MailboxStats},
+    mailbox::{Mailbox, MailboxStats},
     message::{Message, Preview},
 };
 
@@ -183,24 +184,24 @@ impl<S: Read + Write + Unpin> PopSession<S> {
         }
     }
 
-    /// Fetches the message count from the pop server and creates a new 'fake' mailbox.
-    ///
-    /// We do this because Pop does not support mailboxes.
-    async fn get_inbox(&mut self) -> Result<Mailbox> {
+    async fn get_stats(&mut self) -> Result<MailboxStats> {
         let stats = self.session.stat().await?;
 
         let message_count = stats.counter();
 
-        let counts = MailboxStats::new(0, message_count.value()?);
+        let stats = MailboxStats::new(0, message_count.value()?);
 
-        let mailbox = Mailbox::new(
-            Some(counts),
-            None,
-            Vec::new(),
-            true,
-            MAILBOX_DEFAULT_NAME,
-            MAILBOX_DEFAULT_NAME,
-        );
+        Ok(stats)
+    }
+
+    /// Fetches the message count from the pop server and creates a new 'fake' mailbox.
+    ///
+    /// We do this because Pop does not support mailboxes.
+    async fn get_inbox(&mut self) -> Result<Mailbox> {
+        let stats = self.get_stats().await?;
+
+        // Create default inbox with stats
+        let mailbox: Mailbox = stats.into();
 
         Ok(mailbox)
     }
@@ -249,14 +250,12 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
         }
     }
 
-    async fn get_mailbox_list(&mut self) -> Result<MailboxList> {
-        let inbox = self.get_inbox().await?;
-
-        Ok(vec![inbox].into())
+    async fn get_mailbox_list(&mut self) -> Result<Node<Mailbox>> {
+        Ok(self.get_inbox().await?.into())
     }
 
-    async fn get_mailbox(&mut self, _mailbox_id: &str) -> Result<Mailbox> {
-        self.get_inbox().await
+    async fn get_mailbox(&mut self, _mailbox_id: &str) -> Result<Node<Mailbox>> {
+        Ok(self.get_inbox().await?.into())
     }
 
     async fn logout(&mut self) -> Result<()> {
@@ -289,9 +288,7 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
     }
 
     async fn get_messages(&mut self, _: &str, start: usize, end: usize) -> Result<Vec<Preview>> {
-        let mailbox = self.get_inbox().await?;
-
-        let total_messages = mailbox.stats().unwrap().total();
+        let total_messages = self.get_stats().await?.total();
 
         let sequence_start = if total_messages < end {
             1

@@ -3,12 +3,12 @@ use async_trait::async_trait;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::{error::Result, tree::Node};
 
 use super::{
     connection::ConnectionSecurity,
     incoming::types::{
-        mailbox::{Mailbox, MailboxList},
+        mailbox::Mailbox,
         message::{Message, Preview},
     },
     outgoing::types::message::SendableMessage,
@@ -172,9 +172,9 @@ pub trait IncomingProtocol {
 
     fn should_keep_alive(&self) -> bool;
 
-    async fn get_mailbox_list(&mut self) -> Result<MailboxList>;
+    async fn get_mailbox_list(&mut self) -> Result<Node<Mailbox>>;
 
-    async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<Mailbox>;
+    async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<Node<Mailbox>>;
 
     async fn rename_mailbox(&mut self, old_name: &str, new_name: &str) -> Result<()>;
 

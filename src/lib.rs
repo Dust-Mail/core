@@ -1,4 +1,5 @@
 mod runtime;
+pub mod tree;
 
 pub mod client;
 pub mod error;

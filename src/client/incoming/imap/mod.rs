@@ -1,5 +1,6 @@
 mod oauth;
 mod query;
+mod utils;
 
 // use std::collections::HashMap;
 use std::fmt::Debug;
@@ -20,19 +21,20 @@ use crate::{
         net::TcpStream,
         time::{Duration, Instant},
     },
+    tree::Node,
 };
 
+use async_imap::types::Name;
 use async_native_tls::{TlsConnector, TlsStream};
 use async_trait::async_trait;
 use futures::StreamExt;
 use log::{debug, info};
 
-use self::oauth::OAuthCredentials;
-use self::query::QueryBuilder;
+use self::{oauth::OAuthCredentials, query::QueryBuilder, utils::MailboxFinder};
 
 use super::types::{
     flag::Flag,
-    mailbox::{Mailbox, MailboxList, MailboxStats},
+    mailbox::{Mailbox, MailboxStats},
     message::{Message, Preview},
 };
 
@@ -188,20 +190,33 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapSession<S> {
         &mut self,
         reference: Option<&str>,
         pattern: Option<&str>,
-    ) -> Result<MailboxList> {
-        let mut mailboxes: Vec<Mailbox> = Vec::new();
+    ) -> Result<Node<Mailbox>> {
+        let mut names: Vec<_> = Vec::new();
 
         self.close().await?;
 
         {
-            let mut mailbox_stream = self.session.list(reference, pattern).await?;
+            let mut name_stream = self.session.list(reference, pattern).await?;
 
-            while let Some(mailbox) = mailbox_stream.next().await {
-                mailboxes.push(mailbox?.into());
+            while let Some(name) = name_stream.next().await {
+                names.push(name?);
             }
         }
 
-        Ok(mailboxes.into())
+        Ok(utils::build_mailbox_tree(names))
+    }
+
+    async fn get_name<I: AsRef<str>>(&mut self, id: I) -> Result<Name> {
+        let mut name_stream = self.session.list(Some(id.as_ref()), None).await?;
+
+        match name_stream.next().await {
+            Some(result) => Ok(result?),
+            None => err!(
+                ErrorKind::MailBoxNotFound,
+                "Could not find mailbox with id `{}`",
+                id.as_ref()
+            ),
+        }
     }
 
     /// This function will check if a box with a given box id is actually selectable, throwing an error if it is not.
@@ -254,6 +269,15 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapSession<S> {
             "Could not find a mailbox with that id",
         )
     }
+
+    async fn get_mailbox_no_children<M: AsRef<str>>(&mut self, mailbox_id: M) -> Result<Mailbox> {
+        let mailbox_node = self.get_mailbox(mailbox_id.as_ref()).await?;
+
+        match mailbox_node.into_data() {
+            Some(data) => Ok(data),
+            None => unreachable!("Get mailbox has to return node with data"),
+        }
+    }
 }
 
 #[async_trait]
@@ -274,24 +298,25 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
         }
     }
 
-    async fn get_mailbox_list(&mut self) -> Result<MailboxList> {
+    async fn get_mailbox_list(&mut self) -> Result<Node<Mailbox>> {
         self.list(None, Some("*")).await
     }
 
-    async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<Mailbox> {
+    async fn get_mailbox(&mut self, mailbox_id: &str) -> Result<Node<Mailbox>> {
         let list = self.list(Some(mailbox_id), Some("*")).await?;
 
-        match list
-            .to_vec()
-            .into_iter()
-            .find(|mailbox| mailbox.id() == mailbox_id)
-        {
-            Some(mut mailbox) => {
+        match list.into_find(&MailboxFinder::with_id(mailbox_id)) {
+            Some(mut node) => {
+                let mailbox = match node.data_mut() {
+                    Some(data) => data,
+                    None => unreachable!("Find cannot return root node"),
+                };
+
                 let stats = self.select(&mailbox).await?.clone();
 
-                mailbox.add_stats(stats);
+                mailbox.set_stats(stats);
 
-                Ok(mailbox)
+                Ok(node)
             }
             None => {
                 err!(
@@ -315,9 +340,9 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
     }
 
     async fn rename_mailbox(&mut self, box_id: &str, new_name: &str) -> Result<()> {
-        let mailbox = self.get_mailbox(box_id).await?;
+        let name = self.get_name(box_id).await?;
 
-        let new_name = match mailbox.delimiter() {
+        let new_name = match name.delimiter() {
             Some(delimiter) => {
                 let item_count = box_id.matches(delimiter).count();
 
@@ -358,7 +383,7 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
         start: usize,
         end: usize,
     ) -> Result<Vec<Preview>> {
-        let mailbox = self.get_mailbox(box_id).await?;
+        let mailbox = self.get_mailbox_no_children(box_id).await?;
 
         let stats = self.select(&mailbox).await?;
 
@@ -428,7 +453,7 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
             }
         }
 
-        let mailbox = self.get_mailbox(box_id).await?;
+        let mailbox = self.get_mailbox_no_children(box_id).await?;
 
         self.select(&mailbox).await?;
 
