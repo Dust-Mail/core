@@ -24,7 +24,9 @@ async-smtp = { version = "0.9.0", default-features = false, optional = true }
 
 # Autodetect service
 autoconfig = { version = "0.4", default-features = false, optional = true }
-ms-autodiscover = { version = "0.3", default-features = false, features = ["pox"], optional = true }
+ms-autodiscover = { version = "0.3", default-features = false, features = [
+	"pox",
+], optional = true }
 dns-mail-discover = { version = "0.2.7", default-features = false, optional = true }
 
 # Generic mail utilities
@@ -35,7 +37,7 @@ maildir = { version = "0.6.4", optional = true }
 
 # Serde
 serde = { version = "1.0", features = ["derive"], optional = true }
-serde_json = {version = "1.0", optional = true }
+serde_json = { version = "1.0", optional = true }
 
 # Time
 chrono = "0.4"
@@ -44,8 +46,14 @@ chrono = "0.4"
 async-native-tls = { version = "0.5.0", default-features = false }
 
 # Async
-tokio = { version = "1", features = ["net", "macros", "sync", "time", "rt-multi-thread"], optional = true }
-async-std = {version = "1.12.0", features = ["attributes"], optional = true }
+tokio = { version = "1", features = [
+	"net",
+	"macros",
+	"sync",
+	"time",
+	"rt-multi-thread",
+], optional = true }
+async-std = { version = "1.12.0", features = ["attributes"], optional = true }
 async-trait = "0.1.66"
 futures = "0.3"
 
@@ -63,7 +71,15 @@ env_logger = "0.10.0"
 dotenv = "0.15.0"
 
 [features]
-default = ["pop", "imap", "smtp", "discover", "runtime-tokio", "serde", "maildir"]
+default = [
+	"pop",
+	"imap",
+	"smtp",
+	"discover",
+	"runtime-tokio",
+	"serde",
+	"maildir",
+]
 
 maildir = ["dep:maildir"]
 
@@ -79,5 +95,23 @@ imap = ["dep:async-imap"]
 serde = ["dep:serde"]
 json = ["serde", "dep:serde_json"]
 
-runtime-tokio = ["dep:tokio", "async-native-tls/runtime-tokio", "async-imap?/runtime-tokio", "async-smtp?/runtime-tokio", "async-pop?/runtime-tokio", "autoconfig?/runtime-tokio", "ms-autodiscover?/runtime-tokio", "dns-mail-discover?/runtime-tokio"]
-runtime-async-std = ["dep:async-std", "async-native-tls/runtime-async-std", "async-imap?/runtime-async-std", "async-smtp?/runtime-async-std", "async-pop?/runtime-async-std", "autoconfig?/runtime-async-std", "ms-autodiscover?/runtime-async-std", "dns-mail-discover?/runtime-async-std"]
+runtime-tokio = [
+	"dep:tokio",
+	"async-native-tls/runtime-tokio",
+	"async-imap?/runtime-tokio",
+	"async-smtp?/runtime-tokio",
+	"async-pop?/runtime-tokio",
+	"autoconfig?/runtime-tokio",
+	"ms-autodiscover?/runtime-tokio",
+	"dns-mail-discover?/runtime-tokio",
+]
+runtime-async-std = [
+	"dep:async-std",
+	"async-native-tls/runtime-async-std",
+	"async-imap?/runtime-async-std",
+	"async-smtp?/runtime-async-std",
+	"async-pop?/runtime-async-std",
+	"autoconfig?/runtime-async-std",
+	"ms-autodiscover?/runtime-async-std",
+	"dns-mail-discover?/runtime-async-std",
+]

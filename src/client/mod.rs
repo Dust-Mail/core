@@ -12,6 +12,9 @@ use self::incoming::imap;
 #[cfg(feature = "pop")]
 use self::incoming::pop;
 
+#[cfg(feature = "maildir")]
+use self::incoming::maildir;
+
 #[cfg(all(feature = "smtp", feature = "runtime-tokio"))]
 use self::outgoing::smtp;
 
@@ -106,8 +109,15 @@ impl EmailClient {
         start: S,
         end: E,
     ) -> Result<Vec<Preview>> {
+        let start = start.into();
+        let end = end.into();
+
+        if start >= end {
+            return Ok(Vec::new());
+        }
+
         self.incoming
-            .get_messages(box_id.as_ref(), start.into(), end.into())
+            .get_messages(box_id.as_ref(), start, end)
             .await
     }
 
@@ -152,6 +162,9 @@ pub async fn create(
 
         #[cfg(feature = "pop")]
         IncomingEmailProtocol::Pop(credentials) => pop::create(&credentials).await?,
+
+        #[cfg(feature = "maildir")]
+        IncomingEmailProtocol::Maildir(path) => maildir::create(path)?,
 
         #[cfg(not(any(feature = "imap", feature = "pop")))]
         _ => {

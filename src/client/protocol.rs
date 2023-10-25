@@ -168,13 +168,9 @@ impl ServerCredentials for PopCredentials {
 
 #[async_trait]
 pub trait IncomingProtocol {
-    async fn send_keep_alive(&mut self) -> Result<()> {
-        Ok(())
-    }
+    async fn send_keep_alive(&mut self) -> Result<()>;
 
-    fn should_keep_alive(&self) -> bool {
-        false
-    }
+    fn should_keep_alive(&self) -> bool;
 
     async fn get_mailbox_list(&mut self) -> Result<Node<Mailbox>>;
 
@@ -210,6 +206,9 @@ pub enum IncomingEmailProtocol {
 
     #[cfg(feature = "pop")]
     Pop(PopCredentials),
+
+    #[cfg(feature = "maildir")]
+    Maildir(std::path::PathBuf),
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -218,23 +217,11 @@ pub enum OutgoingEmailProtocol {
     Smtp(SmtpCredentials),
 }
 
-pub struct IncomingConfig {
-    #[cfg(feature = "maildir")]
-    pub(crate) maildir: Option<String>,
-}
+pub struct IncomingConfig {}
 
 impl Default for IncomingConfig {
     fn default() -> Self {
-        let mut config = Self::new();
-
-        #[cfg(feature = "maildir")]
-        {
-            use directories::BaseDirs;
-
-            if let Some(dirs) = BaseDirs::new() {
-                config = config.maildir(dirs.cache_dir().join("mail").display());
-            }
-        }
+        let config = Self::new();
 
         config
     }
@@ -242,16 +229,6 @@ impl Default for IncomingConfig {
 
 impl IncomingConfig {
     pub fn new() -> Self {
-        Self {
-            #[cfg(feature = "maildir")]
-            maildir: None,
-        }
-    }
-
-    #[cfg(feature = "maildir")]
-    pub fn maildir<P: std::fmt::Display>(mut self, path: P) -> Self {
-        self.maildir = Some(path.to_string());
-
-        self
+        Self {}
     }
 }
