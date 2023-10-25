@@ -1523,9 +1523,9 @@ checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
 name = "mail-builder"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "765969f4385f88a62738e8ed63e2fa630571d7ed6fd96ca6932d699513dd8c28"
+checksum = "ef70f53409852d2612f2249810cbbe0c9931ca25b739b734bafc7f61d88051d4"
 dependencies = [
  "gethostname 0.4.3",
 ]
