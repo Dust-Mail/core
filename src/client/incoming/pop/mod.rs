@@ -3,9 +3,12 @@ mod constants;
 use std::{collections::HashMap, fmt::Display};
 
 use async_native_tls::{TlsConnector, TlsStream};
-use async_pop::response::{
-    types::DataType,
-    uidl::{UidlResponse, UniqueId},
+use async_pop::{
+    response::{
+        types::DataType,
+        uidl::{UidlResponse, UniqueId},
+    },
+    sasl::OAuth2Authenticator,
 };
 use async_trait::async_trait;
 
@@ -31,11 +34,11 @@ use super::types::{
     message::{Message, Preview},
 };
 
-pub struct PopClient<S: Read + Write + Unpin> {
+pub struct PopClient<S: Read + Write + Unpin + Send> {
     session: async_pop::Client<S>,
 }
 
-impl<S: Read + Write + Unpin> PopClient<S> {
+impl<S: Read + Write + Unpin + Send> PopClient<S> {
     pub async fn login<U: AsRef<str>, P: AsRef<str>>(
         mut self,
         username: U,
@@ -50,10 +53,12 @@ impl<S: Read + Write + Unpin> PopClient<S> {
 
     pub async fn oauth_login<U: AsRef<str>, T: AsRef<str>>(
         mut self,
-        _: U,
+        username: U,
         token: T,
     ) -> Result<PopSession<S>> {
-        self.session.auth(token).await?;
+        let oauth_authenticator = OAuth2Authenticator::new(username.as_ref(), token.as_ref());
+
+        self.session.auth(oauth_authenticator).await?;
 
         let session = PopSession::new(self.session);
 
@@ -103,7 +108,7 @@ impl UniqueIdMap {
     }
 }
 
-pub struct PopSession<S: Read + Write + Unpin> {
+pub struct PopSession<S: Read + Write + Unpin + Send> {
     session: async_pop::Client<S>,
     unique_id_map: UniqueIdMap,
 }
@@ -134,7 +139,7 @@ pub async fn connect_plain<S: AsRef<str>, P: Into<u16>>(
     Ok(PopClient { session })
 }
 
-async fn login<S: Read + Write + Unpin>(
+async fn login<S: Read + Write + Unpin + Send>(
     client: PopClient<S>,
     credentials: &Credentials,
 ) -> Result<PopSession<S>> {
@@ -175,7 +180,7 @@ pub async fn create(
     }
 }
 
-impl<S: Read + Write + Unpin> PopSession<S> {
+impl<S: Read + Write + Unpin + Send> PopSession<S> {
     pub fn new(session: async_pop::Client<S>) -> Self {
         Self {
             session,
