@@ -15,7 +15,7 @@ description = "A multi protocol email client"
 
 [dependencies]
 # Imap
-async-imap = { version = "0.8.0", default-features = false, optional = true }
+async-imap = { version = "0.9.4", default-features = false, optional = true }
 
 # Pop
 async-pop = { version = "1.1.0", default-features = false, features = [
