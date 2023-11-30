@@ -134,6 +134,15 @@ impl IncomingProtocol for MaildirClient {
         Ok(message.build()?)
     }
 
+    async fn get_attachment(
+        &mut self,
+        box_id: &str,
+        message_id: &str,
+        attachment_id: &str,
+    ) -> Result<Vec<u8>> {
+        todo!()
+    }
+
     async fn logout(&mut self) -> Result<()> {
         Ok(())
     }

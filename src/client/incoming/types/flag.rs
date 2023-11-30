@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Flag {
+    HasAttachment,
     Read,
     Deleted,
     Answered,

@@ -66,42 +66,42 @@ pub fn from_parsed_mail<'a>(parsed_mail: ParsedMail<'a>) -> Result<MessageBuilde
         message_builder = message_builder.bcc(bcc);
     }
 
-    let mut text: Option<String> = None;
-    let mut html: Option<String> = None;
+    // let mut text: Option<String> = None;
+    // let mut html: Option<String> = None;
 
-    for part in parsed_mail.parts() {
-        let headers = part.get_headers();
+    // for part in parsed_mail.parts() {
+    //     let headers = part.get_headers();
 
-        for header in headers {
-            let key = header.get_key_ref().trim().to_ascii_lowercase();
+    //     for header in headers {
+    //         let key = header.get_key_ref().trim().to_ascii_lowercase();
 
-            if key == "content-type" {
-                let value = header.get_value().trim().to_ascii_lowercase();
+    //         if key == "content-type" {
+    //             let value = header.get_value().trim().to_ascii_lowercase();
 
-                let body = Some(part.get_body()?);
+    //             let body = Some(part.get_body()?);
 
-                if value.starts_with("text/plain") {
-                    text = match body {
-                        Some(body_data) => Some(super::sanitize_text(&body_data)),
-                        None => None,
-                    }
-                } else if value.starts_with("text/html") {
-                    html = match body {
-                        Some(body_data) => Some(super::sanitize_html(&body_data)),
-                        None => None,
-                    }
-                }
-            }
-        }
-    }
+    //             if value.starts_with("text/plain") {
+    //                 text = match body {
+    //                     Some(body_data) => Some(super::sanitize_text(&body_data)),
+    //                     None => None,
+    //                 }
+    //             } else if value.starts_with("text/html") {
+    //                 html = match body {
+    //                     Some(body_data) => Some(super::sanitize_html(&body_data)),
+    //                     None => None,
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
-    if let Some(html) = html {
-        message_builder = message_builder.html(html)
-    }
+    // if let Some(html) = html {
+    //     message_builder = message_builder.html(html)
+    // }
 
-    if let Some(text) = text {
-        message_builder = message_builder.text(text)
-    }
+    // if let Some(text) = text {
+    //     message_builder = message_builder.text(text)
+    // }
 
     if let Some(subject) = subject {
         message_builder = message_builder.subject(subject);

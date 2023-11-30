@@ -21,13 +21,20 @@ use crate::{
     tree::Node,
 };
 
-use async_imap::types::Name;
+use async_imap::{
+    imap_proto::SectionPath,
+    types::{Fetch, Name},
+};
 use async_native_tls::{TlsConnector, TlsStream};
 use async_trait::async_trait;
 use futures::StreamExt;
 use log::{debug, info};
 
-use self::{oauth::OAuthCredentials, query::QueryBuilder, utils::MailboxFinder};
+use self::{
+    oauth::OAuthCredentials,
+    query::QueryBuilder,
+    utils::{BodyStructureParser, MailboxFinder, PartNumber},
+};
 
 use super::types::{
     flag::Flag,
@@ -180,6 +187,25 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> ImapSession<S> {
         }
 
         Ok(utils::build_mailbox_tree(names))
+    }
+
+    async fn uid_fetch_single<U: AsRef<str>, Q: AsRef<str>>(
+        &mut self,
+        uid: U,
+        query: Q,
+    ) -> Result<Fetch> {
+        let mut fetch_stream = self.session.uid_fetch(uid.as_ref(), query).await?;
+
+        let fetched = fetch_stream.next().await;
+
+        match fetched {
+            Some(fetched) => Ok(fetched?),
+            None => err!(
+                ErrorKind::MessageNotFound,
+                "Could not find a message with id `{}`",
+                uid.as_ref(),
+            ),
+        }
     }
 
     async fn get_name<I: AsRef<str>>(&mut self, id: I) -> Result<Name> {
@@ -387,6 +413,7 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
 
         let query = QueryBuilder::default()
             .headers(vec!["From", "Date", "Subject"])
+            .bodystructure()
             .build();
 
         {
@@ -395,26 +422,35 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
             while let Some(fetch) = preview_stream.next().await {
                 let fetch = fetch?;
 
-                if let Some(headers) = fetch.header() {
-                    let message_id = match fetch.uid {
-                        Some(uid) => uid,
-                        None => err!(
-                            ErrorKind::InvalidMessage,
-                            "The requested message is missing a unique identifier"
-                        ),
-                    };
+                let body_structure: BodyStructureParser<'_> = fetch
+                    .bodystructure()
+                    .expect("'BODYSTRUCTURE' was expected to have been specified in the query")
+                    .into();
 
-                    let flags = fetch
-                        .flags()
-                        .into_iter()
-                        .filter_map(|flag| Flag::from_imap(&flag));
+                let attachments = body_structure.extract_attachments();
 
-                    let builder: MessageBuilder = headers.try_into()?;
+                let headers = fetch
+                    .header()
+                    .expect("'HEADER' was expected to have been specified in the query'");
 
-                    let preview: Preview = builder.flags(flags).id(message_id).build()?;
+                let message_id = fetch
+                    .uid
+                    .expect("'UID' was expected to have been specified in the query'");
 
-                    previews.push(preview);
-                }
+                let flags = fetch
+                    .flags()
+                    .into_iter()
+                    .filter_map(|flag| Flag::from_imap(&flag));
+
+                let builder: MessageBuilder = headers.try_into()?;
+
+                let preview: Preview = builder
+                    .flags(flags)
+                    .attachments(attachments)
+                    .id(message_id)
+                    .build()?;
+
+                previews.push(preview);
             }
         }
 
@@ -426,65 +462,113 @@ impl<S: Read + Write + Unpin + Debug + Send + Sync> IncomingProtocol for ImapSes
 
         self.select(&mailbox).await?;
 
-        let query = QueryBuilder::default().body().build();
+        let message_data = self
+            .uid_fetch_single(
+                msg_id,
+                QueryBuilder::new()
+                    .flags()
+                    .uid()
+                    .bodystructure()
+                    .headers::<String>(Vec::new())
+                    .build(),
+            )
+            .await?;
 
-        let mut fetch_stream = self.session.uid_fetch(msg_id, query).await?;
+        let body_structure: BodyStructureParser<'_> = message_data
+            .bodystructure()
+            .expect("'BODYSTRUCTURE' was expected to have been specified in the query")
+            .into();
 
-        let mut fetched = Vec::new();
+        let attachments = body_structure.extract_attachments();
 
-        while let Some(fetch) = fetch_stream.next().await {
-            let fetch = fetch?;
-
-            let server_uid = match &fetch.uid {
-                Some(uid) => uid,
-                // Only returns None when the UID parameter is not specified.
-                None => unreachable!(),
-            };
-
-            let uid: u32 = msg_id.parse()?;
-
-            // Only add the fetches that match our uid
-            if &uid == server_uid {
-                fetched.push(fetch);
-            }
-        }
-
-        let fetch = match fetched.first() {
-            Some(first) => first,
-            None => err!(
-                ErrorKind::MessageNotFound,
-                "Could not find a message with that id",
-            ),
-        };
-
-        let message_id = match fetch.uid {
-            Some(uid) => uid.to_string(),
-            None => err!(
-                ErrorKind::InvalidMessage,
-                "The requested message is missing a unique identifier"
-            ),
-        };
-
-        let flags = fetch
+        let flags = message_data
             .flags()
             .into_iter()
             .filter_map(|flag| Flag::from_imap(&flag));
 
-        match fetch.body() {
-            Some(body) => {
-                let builder: MessageBuilder = body.try_into()?;
+        let message_id = message_data
+            .uid
+            .expect("'UID' was expected to have been specified in the query");
 
-                let message: Message = builder.flags(flags).id(message_id).build()?;
+        let headers = message_data
+            .header()
+            .expect("'HEADER' was expected to have been specified in the query");
 
-                Ok(message)
+        let mut builder: MessageBuilder = headers.try_into()?;
+
+        let text_part_number = body_structure.find_part_number_for(mime::TEXT_PLAIN);
+        let html_part_number = body_structure.find_part_number_for(mime::TEXT_HTML);
+
+        if text_part_number.is_some() || html_part_number.is_some() {
+            let mut query = QueryBuilder::new();
+
+            if let Some(text_part_number) = text_part_number.as_ref() {
+                query = query.section(text_part_number);
             }
-            None => {
-                err!(
-                    ErrorKind::InvalidMessage,
-                    "The requested message is missing a body"
-                )
+
+            if let Some(html_part_number) = html_part_number.as_ref() {
+                query = query.section(html_part_number);
+            }
+
+            let body_data = self.uid_fetch_single(msg_id, query.build()).await?;
+
+            if let Some(html_part_number) = html_part_number {
+                let section_path: SectionPath = html_part_number.into();
+
+                if let Some(html) = body_data.section(&section_path) {
+                    builder = builder.html(std::str::from_utf8(html)?);
+                }
+            }
+
+            if let Some(text_part_number) = text_part_number {
+                let section_path: SectionPath = text_part_number.into();
+
+                if let Some(text) = body_data.section(&section_path) {
+                    builder = builder.text(std::str::from_utf8(text)?);
+                }
             }
         }
+
+        let message: Message = builder
+            .flags(flags)
+            .attachments(attachments)
+            .id(message_id)
+            .build()?;
+
+        Ok(message)
+    }
+
+    async fn get_attachment(
+        &mut self,
+        box_id: &str,
+        message_id: &str,
+        attachment_id: &str,
+    ) -> Result<Vec<u8>> {
+        let mailbox = self.get_mailbox_no_children(box_id).await?;
+
+        self.select(&mailbox).await?;
+
+        let part_number: PartNumber = attachment_id.parse()?;
+
+        let query = QueryBuilder::new().section(&part_number).build();
+
+        let attachment_data = self.uid_fetch_single(message_id, query).await?;
+
+        let section_path: SectionPath = part_number.into();
+
+        if let Some(bytes) = attachment_data
+            .section(&section_path)
+            .map(|bytes| if bytes.is_empty() { None } else { Some(bytes) })
+            .flatten()
+        {
+            return Ok(bytes.to_vec());
+        }
+
+        err!(
+            ErrorKind::AttachmentNotFound,
+            "Could not find an attachment with id '{}'",
+            attachment_id
+        );
     }
 }
 
@@ -566,7 +650,7 @@ mod tests {
     async fn get_message() {
         let mut session = create_test_session().await;
 
-        let msg_id = "1707";
+        let msg_id = "1";
         let box_id = "INBOX";
 
         let message = session.get_message(box_id, msg_id).await.unwrap();

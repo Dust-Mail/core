@@ -191,6 +191,13 @@ pub trait IncomingProtocol {
 
     async fn get_message(&mut self, box_id: &str, message_id: &str) -> Result<Message>;
 
+    async fn get_attachment(
+        &mut self,
+        box_id: &str,
+        message_id: &str,
+        attachment_id: &str,
+    ) -> Result<Vec<u8>>;
+
     async fn logout(&mut self) -> Result<()>;
 }
 

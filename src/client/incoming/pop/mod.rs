@@ -363,6 +363,15 @@ impl<S: Read + Write + Unpin + Send> IncomingProtocol for PopSession<S> {
 
         Ok(message)
     }
+
+    async fn get_attachment(
+        &mut self,
+        box_id: &str,
+        message_id: &str,
+        attachment_id: &str,
+    ) -> Result<Vec<u8>> {
+        todo!()
+    }
 }
 
 #[cfg(test)]

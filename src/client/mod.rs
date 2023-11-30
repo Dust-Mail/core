@@ -41,6 +41,7 @@ pub use incoming::types::*;
 pub use outgoing::types::*;
 
 pub mod address;
+pub mod attachment;
 pub mod builder;
 pub mod connection;
 pub mod content;
@@ -128,6 +129,21 @@ impl EmailClient {
     ) -> Result<Message> {
         self.incoming
             .get_message(box_id.as_ref(), message_id.as_ref())
+            .await
+    }
+
+    pub async fn get_attachment<
+        BoxId: AsRef<str>,
+        MessageId: AsRef<str>,
+        AttachmentId: AsRef<str>,
+    >(
+        &mut self,
+        box_id: BoxId,
+        message_id: MessageId,
+        attachment_id: AttachmentId,
+    ) -> Result<Vec<u8>> {
+        self.incoming
+            .get_attachment(box_id.as_ref(), message_id.as_ref(), attachment_id.as_ref())
             .await
     }
 

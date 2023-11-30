@@ -744,6 +744,7 @@ dependencies = [
  "mail-builder",
  "maildir",
  "mailparse",
+ "mime",
  "ms-autodiscover",
  "serde",
  "serde_json",

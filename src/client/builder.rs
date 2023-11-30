@@ -2,7 +2,10 @@ use std::{collections::HashMap, fmt::Display, result};
 
 use crate::error::{err, Error, ErrorKind, Result};
 
-use super::{address::Address, content::Content, incoming::types::flag::Flag, parser, Headers};
+use super::{
+    address::Address, attachment::Attachment, content::Content, incoming::types::flag::Flag,
+    parser, Headers,
+};
 
 #[derive(Debug)]
 pub struct MessageBuilder {
@@ -15,6 +18,7 @@ pub struct MessageBuilder {
     pub(crate) sent: Option<i64>,
     pub(crate) subject: Option<String>,
     pub(crate) headers: Option<Headers>,
+    pub(crate) attachments: Vec<Attachment>,
     pub(crate) content: Content,
 }
 
@@ -71,6 +75,7 @@ impl MessageBuilder {
             sent: None,
             subject: None,
             content: Content::default(),
+            attachments: Vec::new(),
             headers: None,
         }
     }
@@ -127,6 +132,12 @@ impl MessageBuilder {
         self
     }
 
+    pub fn attachments(mut self, attachments: Vec<Attachment>) -> Self {
+        self.attachments = attachments;
+
+        self
+    }
+
     pub fn subject<S: Display>(mut self, subject: S) -> Self {
         self.subject = Some(subject.to_string());
 
@@ -163,10 +174,14 @@ impl MessageBuilder {
         self
     }
 
-    pub fn build<T: TryFrom<Self>>(self) -> Result<T> {
+    pub fn build<T: TryFrom<Self, Error = impl Display>>(self) -> Result<T> {
         match self.try_into() {
             Ok(message) => Ok(message),
-            Err(_err) => err!(ErrorKind::InvalidMessage, "Could not build a valid message"),
+            Err(err) => err!(
+                ErrorKind::InvalidMessage,
+                "Could not build a valid message: {}",
+                err
+            ),
         }
     }
 }

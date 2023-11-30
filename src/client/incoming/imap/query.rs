@@ -1,5 +1,8 @@
+use super::utils::PartNumber;
+
 pub struct QueryBuilder {
     query: Vec<String>,
+    // body: Vec<String>,
 }
 
 impl Default for QueryBuilder {
@@ -25,8 +28,14 @@ impl QueryBuilder {
         self
     }
 
-    pub fn body(mut self) -> Self {
-        self.query.push(String::from("RFC822"));
+    pub fn section(mut self, section: &PartNumber) -> Self {
+        self.query.push(format!("BODY[{}]", section));
+
+        self
+    }
+
+    pub fn bodystructure(mut self) -> Self {
+        self.query.push(String::from("BODYSTRUCTURE"));
 
         self
     }
@@ -38,7 +47,7 @@ impl QueryBuilder {
     }
 
     pub fn headers<H: Into<String>>(mut self, headers: Vec<H>) -> Self {
-        if headers.len() != 0 {
+        if !headers.is_empty() {
             let headers: Vec<String> = headers.into_iter().map(|head| head.into()).collect();
             self.query
                 .push(format!("BODY[HEADER.FIELDS ({})]", headers.join(" ")));

@@ -4,7 +4,10 @@ use std::{collections::HashMap, result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    client::{address::Address, builder::MessageBuilder, content::Content, Headers},
+    client::{
+        address::Address, attachment::Attachment, builder::MessageBuilder, content::Content,
+        Headers,
+    },
     error::{err, Error, ErrorKind},
 };
 
@@ -69,8 +72,14 @@ impl TryFrom<MessageBuilder> for Preview {
             None => err!(ErrorKind::InvalidMessage, "Message is missing sender"),
         };
 
+        let mut flags = builder.flags;
+
+        if !builder.attachments.is_empty() {
+            flags.push(Flag::HasAttachment);
+        }
+
         let preview = Preview {
-            flags: builder.flags,
+            flags,
             from,
             id,
             sent: builder.sent,
@@ -93,6 +102,7 @@ pub struct Message {
     id: String,
     sent: Option<i64>,
     subject: Option<String>,
+    attachments: Vec<Attachment>,
     content: Content,
 }
 
@@ -125,6 +135,7 @@ impl TryFrom<MessageBuilder> for Message {
             sent: builder.sent,
             subject: builder.subject,
             content: builder.content,
+            attachments: builder.attachments,
             headers: builder.headers.unwrap_or(HashMap::new()),
         };
 

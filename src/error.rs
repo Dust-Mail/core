@@ -1,4 +1,4 @@
-use std::{error, fmt, num::ParseIntError, result};
+use std::{error, fmt, num::ParseIntError, result, str::Utf8Error};
 
 #[cfg(feature = "pop")]
 use async_pop::error::Error as PopError;
@@ -46,6 +46,7 @@ macro_rules! err {
 #[derive(Debug)]
 pub enum ErrorKind {
     MessageNotFound,
+    AttachmentNotFound,
     /// The server responded with some unexpected data.
     UnexpectedBehavior,
     /// The requested feature/function is unsupported for this client type.
@@ -78,9 +79,8 @@ pub enum ErrorKind {
     MailServer,
     /// Failed to serialize the given data to JSON.
     SerializeJSON,
-    /// Could not detect a config from the given email address.
-    ConfigNotFound,
     ParseEmailAddress(AddressParseError),
+    ParseString(Utf8Error),
     MailBoxNotFound,
     NoClientAvailable,
 }
@@ -170,6 +170,11 @@ impl_from_error!(
     maildir::MailEntryError,
     |err| ErrorKind::MailEntry(err),
     "Failed to retrieve email from local directory"
+);
+impl_from_error!(
+    Utf8Error,
+    |err| ErrorKind::ParseString(err),
+    "Failed to parse bytes to utf-8 string"
 );
 
 impl fmt::Display for Error {
